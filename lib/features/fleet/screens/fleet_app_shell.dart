@@ -3,15 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../data/models/fleet_job_quote.dart';
 import '../../../data/models/fleet_job_summary.dart';
 import '../../../data/models/vehicle.dart';
 import '../../../data/repositories/app_repository.dart';
 import '../../../routes/app_routes.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
+import '../models/fleet_chat_session.dart';
 import '../viewmodel/fleet_viewmodel.dart';
+import 'fleet_chat_screen.dart';
 import '../widgets/fleet_track_job_detail_view.dart';
 import 'notifications_screen.dart';
 import 'post_job_screen.dart';
@@ -173,6 +177,25 @@ String _fleetJobPayDisplay(FleetJobSummary j) {
   };
 }
 
+/// CachedNetworkImage misbehaves / asserts on empty URLs.
+String _safeMechanicPhotoUrl(String? url) {
+  final u = url?.trim();
+  if (u == null || u.isEmpty) return AppAssets.mechanicPortrait;
+  return u;
+}
+
+/// Server-backed jobs: open [FleetTrackJobDetailView] instead of the dashboard bottom sheet
+/// (quotes + active layout are only for demo / posting / quoting flows).
+bool _fleetJobOpensTrackingDetail(FleetJobSummary j) {
+  final bid = j.backendId?.trim();
+  if (bid == null || bid.isEmpty) return false;
+  final s = j.status.toUpperCase();
+  if (s.contains('AWAITING')) return false;
+  if (s.contains('POST')) return false;
+  if (s.contains('QUOT')) return false;
+  return true;
+}
+
 /// Quotes list for POSTED jobs (`DashboardJobSheet` / `check.tsx`).
 class _FleetPostedQuote {
   const _FleetPostedQuote({
@@ -202,6 +225,31 @@ class _FleetPostedQuote {
   final String callout;
   final String parts;
   final String speciality;
+}
+
+FleetJobQuote _fleetQuoteFromDemo(_FleetPostedQuote q, int index) {
+  final etaM = RegExp(r'(\d+)').firstMatch(q.eta);
+  final etaMinutes = int.tryParse(etaM?.group(1) ?? '') ?? 0;
+  final distM = RegExp(r'([\d.]+)').firstMatch(q.distance);
+  final distKm = double.tryParse(distM?.group(1) ?? '');
+  double parseAmt(String s) => double.tryParse(s.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+  return FleetJobQuote(
+    id: 'demo-$index',
+    etaMinutes: etaMinutes,
+    currency: 'GBP',
+    labour: parseAmt(q.labour),
+    callOutFee: parseAmt(q.callout),
+    parts: parseAmt(q.parts),
+    total: parseAmt(q.total),
+    mechanicName: q.name,
+    mechanicRating: q.rating,
+    jobsDone: q.jobs,
+    verified: q.verified,
+    specialtySummary: q.speciality,
+    createdAt: DateTime.now().subtract(Duration(minutes: 5 - index)),
+    profilePhotoUrl: AppAssets.mechanicPortrait,
+    distanceKm: distKm,
+  );
 }
 
 const List<_FleetPostedQuote> _kFleetPostedQuotes = [
@@ -283,6 +331,11 @@ class _FleetScaffold extends StatelessWidget {
           if (vm.showPaymentMethods) _FleetPaymentOverlay(),
           if (vm.showHelp) _FleetHelpOverlay(),
           if (vm.showNotifications) FleetNotificationsOverlay(),
+          if (vm.showChat && vm.chatSession != null)
+            FleetChatScreen(
+              session: vm.chatSession!,
+              onClose: vm.closeChat,
+            ),
         ],
       ),
     );
@@ -305,7 +358,6 @@ class _FleetBody extends StatelessWidget {
           onTracking: () => vm.setTab('tracking'),
           onOpenNotifications: vm.openNotifications,
           onOpenProfile: () => vm.setTab('profile'),
-          onOpenChat: vm.openChat,
         );
       case 'post-job':
         return FleetPostJobScreen(
@@ -347,7 +399,6 @@ class _FleetBody extends StatelessWidget {
             onTracking: () => vm.setTab('tracking'),
             onOpenNotifications: vm.openNotifications,
             onOpenProfile: () => vm.setTab('profile'),
-            onOpenChat: vm.openChat,
           );
         }
         return _FleetVehicleDetail(
@@ -362,7 +413,6 @@ class _FleetBody extends StatelessWidget {
           onTracking: () => vm.setTab('tracking'),
           onOpenNotifications: vm.openNotifications,
           onOpenProfile: () => vm.setTab('profile'),
-          onOpenChat: vm.openChat,
         );
     }
   }
@@ -502,12 +552,15 @@ class _FleetCompletionReviewOverlay extends StatefulWidget {
     required this.mechanic,
     required this.truckLine,
     required this.totalCost,
+    this.backendJobId,
     required this.onClose,
   });
 
   final String mechanic;
   final String truckLine;
   final String totalCost;
+  /// Mongo/backend job id for `PATCH .../jobs/:id/complete/approve`.
+  final String? backendJobId;
   final VoidCallback onClose;
 
   @override
@@ -520,6 +573,8 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
   int _rating = 0;
   final _reviewText = TextEditingController();
   bool _reviewSubmitted = false;
+  bool _approveLoading = false;
+  String? _approveErr;
 
   static const Color _sheetBg = Color(0xFF0E0E0E);
   static const Color _approveGreen = Color(0xFF4ADE80);
@@ -670,25 +725,69 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
             ],
           ),
         ),
+        if (_approveErr != null && _approveErr!.trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            _approveErr!,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35),
+          ),
+        ],
         const SizedBox(height: 20),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: () => setState(() {
-              _showApproval = false;
-              _showReview = true;
-            }),
+            onPressed: _approveLoading
+                ? null
+                : () async {
+                    final id = widget.backendJobId?.trim();
+                    if (id == null || id.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Cannot approve: job is not linked to the server.')),
+                      );
+                      return;
+                    }
+                    final vm = context.read<FleetViewModel>();
+                    setState(() {
+                      _approveLoading = true;
+                      _approveErr = null;
+                    });
+                    try {
+                      await vm.approveJobCompletion(id);
+                      if (!mounted) return;
+                      setState(() {
+                        _approveLoading = false;
+                        _showApproval = false;
+                        _showReview = true;
+                      });
+                      await vm.refresh();
+                    } catch (e) {
+                      if (!mounted) return;
+                      setState(() {
+                        _approveLoading = false;
+                        _approveErr = e.toString();
+                      });
+                    }
+                  },
             style: ElevatedButton.styleFrom(
               backgroundColor: _approveGreen,
               foregroundColor: Colors.black,
+              disabledBackgroundColor: _approveGreen.withValues(alpha: 0.45),
+              disabledForegroundColor: Colors.black.withValues(alpha: 0.45),
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               elevation: 0,
             ),
-            child: const Text(
-              'APPROVE & CONTINUE',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1),
-            ),
+            child: _approveLoading
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                  )
+                : const Text(
+                    'APPROVE & CONTINUE',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1),
+                  ),
           ),
         ),
         TextButton(
@@ -849,12 +948,10 @@ class _FleetDashboardJobOverlay extends StatefulWidget {
   const _FleetDashboardJobOverlay({
     required this.job,
     required this.onClose,
-    required this.onOpenChat,
   });
 
   final FleetJobSummary job;
   final VoidCallback onClose;
-  final VoidCallback onOpenChat;
 
   @override
   State<_FleetDashboardJobOverlay> createState() => _FleetDashboardJobOverlayState();
@@ -863,9 +960,79 @@ class _FleetDashboardJobOverlay extends StatefulWidget {
 class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
   int? _expandedQuoteIndex;
   int? _acceptedQuoteIndex;
+  int? _acceptingQuoteIndex;
+  String? _acceptQuoteErr;
   bool _cancelOpen = false;
+  bool _cancelSubmitting = false;
+  String? _cancelErr;
 
-  bool get _isPosted => widget.job.status.toUpperCase().contains('POST');
+  FleetJobQuote? _acceptedQuote(FleetViewModel vm) {
+    for (final q in vm.jobQuotes) {
+      final s = (q.apiStatus ?? '').toUpperCase();
+      if (s.contains('ACCEPT')) return q;
+    }
+    return null;
+  }
+
+  void _dismissCancelSheet() {
+    setState(() {
+      _cancelOpen = false;
+      _cancelSubmitting = false;
+      _cancelErr = null;
+    });
+  }
+
+  Future<void> _onTapAccept(int i, FleetJobQuote q) async {
+    if (_acceptingQuoteIndex != null) return;
+    final isDemo = q.id.startsWith('demo-');
+    if (isDemo) {
+      setState(() {
+        _acceptQuoteErr = null;
+        _acceptedQuoteIndex = i;
+      });
+      return;
+    }
+    setState(() {
+      _acceptQuoteErr = null;
+      _acceptingQuoteIndex = i;
+    });
+    try {
+      await context.read<FleetViewModel>().acceptJobQuote(q.id);
+      if (!mounted) return;
+      setState(() {
+        _acceptingQuoteIndex = null;
+        _acceptedQuoteIndex = i;
+      });
+      await context.read<FleetViewModel>().refresh();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _acceptingQuoteIndex = null;
+        _acceptQuoteErr = e.toString();
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _expandedQuoteIndex = null;
+    _acceptedQuoteIndex = null;
+    _acceptingQuoteIndex = null;
+    _acceptQuoteErr = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final id = widget.job.backendId;
+      if (id != null && id.trim().isNotEmpty) {
+        context.read<FleetViewModel>().loadJobQuotes(id);
+      }
+    });
+  }
+
+  bool get _isPosted {
+    final s = widget.job.status.toUpperCase();
+    return s.contains('POST') || s.contains('QUOT');
+  }
 
   bool get _isEnRoute {
     final s = widget.job.status.toUpperCase();
@@ -1011,36 +1178,81 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                           children: [
                             if (!_isPosted) ...[
                               Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: () {
-                                        widget.onOpenChat();
-                                        widget.onClose();
-                                      },
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.white,
-                                        side: const BorderSide(color: AppColors.border2),
-                                        backgroundColor: const Color(0xFF1A1A1A),
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    child: SizedBox(
+                                      height: 52,
+                                      child: OutlinedButton(
+                                        onPressed: () {
+                                          final vm = context.read<FleetViewModel>();
+                                          final acc = _acceptedQuote(vm);
+                                          vm.openJobChat(
+                                            FleetChatSession(
+                                              mechanicName: acc?.mechanicName ?? _fleetMechanicLabel(widget.job),
+                                              mechanicPhone: acc?.mechanicPhone,
+                                              mechanicPhotoUrl: () {
+                                                final p = acc?.profilePhotoUrl?.trim();
+                                                return (p != null && p.isNotEmpty) ? p : null;
+                                              }(),
+                                              jobCode: widget.job.id,
+                                              truckLine: _fleetTruckDisplay(widget.job),
+                                            ),
+                                          );
+                                          widget.onClose();
+                                        },
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.white,
+                                          side: const BorderSide(color: AppColors.border2),
+                                          backgroundColor: const Color(0xFF1A1A1A),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          alignment: Alignment.center,
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          mainAxisSize: MainAxisSize.max,
+                                          children: [
+                                            Icon(Icons.chat_bubble_outline_rounded, color: AppColors.primary, size: 18),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                'Chat with Mechanic',
+                                                textAlign: TextAlign.center,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, height: 1.2),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                      icon: Icon(Icons.chat_bubble_outline_rounded, color: AppColors.primary, size: 18),
-                                      label: const Text('Chat with Mechanic', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 10),
                                   Expanded(
-                                    child: OutlinedButton(
-                                      onPressed: () => setState(() => _cancelOpen = true),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: AppColors.red,
-                                        side: BorderSide(color: AppColors.red.withValues(alpha: 0.30)),
-                                        backgroundColor: AppColors.red.withValues(alpha: 0.10),
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    child: SizedBox(
+                                      height: 52,
+                                      child: OutlinedButton(
+                                        onPressed: () => setState(() {
+                                          _cancelOpen = true;
+                                          _cancelErr = null;
+                                          _cancelSubmitting = false;
+                                        }),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AppColors.red,
+                                          side: BorderSide(color: AppColors.red.withValues(alpha: 0.30)),
+                                          backgroundColor: AppColors.red.withValues(alpha: 0.10),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          alignment: Alignment.center,
+                                        ),
+                                        child: const Text(
+                                          'Cancel Job',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                        ),
                                       ),
-                                      child: const Text('Cancel Job', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                                     ),
                                   ),
                                 ],
@@ -1107,6 +1319,46 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
       );
     }
 
+    final vm = context.watch<FleetViewModel>();
+    final useApi = widget.job.backendId != null && widget.job.backendId!.trim().isNotEmpty;
+    final quotes = useApi
+        ? vm.jobQuotes
+        : _kFleetPostedQuotes.asMap().entries.map((e) => _fleetQuoteFromDemo(e.value, e.key)).toList();
+
+    if (useApi && vm.jobQuotesLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32),
+        child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+      );
+    }
+    if (useApi && (vm.jobQuotesError != null && vm.jobQuotesError!.trim().isNotEmpty)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(vm.jobQuotesError!, style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35)),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () => context.read<FleetViewModel>().loadJobQuotes(widget.job.backendId),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.40)),
+            ),
+            child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      );
+    }
+    if (quotes.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Text(
+          useApi ? 'No quotes yet.' : 'No quotes.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.95), fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1118,16 +1370,25 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
               style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.2),
             ),
             Text(
-              '${_kFleetPostedQuotes.length} mechanics responded',
+              '${quotes.length} mechanic${quotes.length == 1 ? '' : 's'} responded',
               style: TextStyle(color: AppColors.textMuted, fontSize: 10),
             ),
           ],
         ),
+        if (_acceptQuoteErr != null && _acceptQuoteErr!.trim().isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(
+            _acceptQuoteErr!,
+            style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35),
+          ),
+        ],
         const SizedBox(height: 12),
-        ...List.generate(_kFleetPostedQuotes.length, (i) {
-          final q = _kFleetPostedQuotes[i];
+        ...List.generate(quotes.length, (i) {
+          final q = quotes[i];
           final isBest = i == 0;
           final expanded = _expandedQuoteIndex == i;
+          final spec = q.specialtySummary.trim().isEmpty ? '—' : q.specialtySummary;
+          final subtitleJobs = '${q.jobsDone} jobs · $spec';
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: Container(
@@ -1169,7 +1430,7 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                             ClipRRect(
                               borderRadius: BorderRadius.circular(10),
                               child: CachedNetworkImage(
-                                imageUrl: AppAssets.mechanicPortrait,
+                                imageUrl: _safeMechanicPhotoUrl(q.profilePhotoUrl),
                                 width: 44,
                                 height: 44,
                                 fit: BoxFit.cover,
@@ -1190,7 +1451,7 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                                     children: [
                                       Flexible(
                                         child: Text(
-                                          q.name,
+                                          q.mechanicName,
                                           style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
                                         ),
                                       ),
@@ -1216,8 +1477,14 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                                     children: [
                                       Icon(Icons.star_rounded, color: AppColors.primary, size: 14),
                                       const SizedBox(width: 4),
-                                      Text('${q.rating}', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
-                                      Text(' · ${q.jobs} jobs · ${q.speciality}', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                                      Text(
+                                        q.mechanicRating.toStringAsFixed(1),
+                                        style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600),
+                                      ),
+                                      Text(
+                                        ' · $subtitleJobs',
+                                        style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+                                      ),
                                     ],
                                   ),
                                 ],
@@ -1226,8 +1493,9 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                Text(q.total, style: const TextStyle(color: AppColors.primary, fontSize: 16, fontWeight: FontWeight.w900)),
-                                Text(q.responded, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                                Text(q.totalDisplay, style: const TextStyle(color: AppColors.primary, fontSize: 16, fontWeight: FontWeight.w900)),
+                                if (q.respondedLabel.isNotEmpty)
+                                  Text(q.respondedLabel, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
                               ],
                             ),
                           ],
@@ -1246,26 +1514,31 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                                 children: [
                                   Icon(Icons.navigation_rounded, color: AppColors.orange, size: 14),
                                   const SizedBox(width: 6),
-                                  Text('ETA ${q.eta}', style: const TextStyle(color: AppColors.orange, fontSize: 11, fontWeight: FontWeight.w900)),
+                                  Text(q.etaLabel, style: const TextStyle(color: AppColors.orange, fontSize: 11, fontWeight: FontWeight.w900)),
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: _FleetDashTheme.statCardBg,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFF1E1E1E)),
+                            if (q.distanceKm != null) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: _FleetDashTheme.statCardBg,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF1E1E1E)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.place_outlined, color: AppColors.textMuted, size: 14),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '${q.distanceKm} km away',
+                                      style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.95), fontSize: 11, fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.place_outlined, color: AppColors.textMuted, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text('${q.distance} away', style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.95), fontSize: 11, fontWeight: FontWeight.w600)),
-                                ],
-                              ),
-                            ),
+                            ],
                           ],
                         ),
                         if (expanded) ...[
@@ -1285,15 +1558,15 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                                   style: TextStyle(color: AppColors.textMuted, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
                                 ),
                                 const SizedBox(height: 8),
-                                _quoteBreakRow('Labour', q.labour),
-                                _quoteBreakRow('Call-out Fee', q.callout),
-                                _quoteBreakRow('Parts (est.)', q.parts),
+                                _quoteBreakRow('Labour', q.labourDisplay),
+                                _quoteBreakRow('Call-out Fee', q.calloutDisplay),
+                                _quoteBreakRow('Parts (est.)', q.partsDisplay),
                                 const Divider(color: AppColors.border2, height: 16),
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     const Text('Total', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900)),
-                                    Text(q.total, style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w900)),
+                                    Text(q.totalDisplay, style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w900)),
                                   ],
                                 ),
                               ],
@@ -1305,21 +1578,31 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                           children: [
                             Expanded(
                               child: ElevatedButton.icon(
-                                onPressed: () => setState(() => _acceptedQuoteIndex = i),
+                                onPressed: _acceptingQuoteIndex != null ? null : () => _onTapAccept(i, q),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primary,
                                   foregroundColor: Colors.black,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   elevation: 0,
+                                  disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.55),
+                                  disabledForegroundColor: Colors.black.withValues(alpha: 0.45),
                                 ),
-                                icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-                                label: Text('Accept · ${q.total}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                                icon: _acceptingQuoteIndex == i
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                                      )
+                                    : const Icon(Icons.check_circle_outline_rounded, size: 18),
+                                label: Text('Accept · ${q.totalDisplay}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
                               ),
                             ),
                             const SizedBox(width: 8),
                             IconButton(
-                              onPressed: () => setState(() => _expandedQuoteIndex = expanded ? null : i),
+                              onPressed: _acceptingQuoteIndex != null
+                                  ? null
+                                  : () => setState(() => _expandedQuoteIndex = expanded ? null : i),
                               style: IconButton.styleFrom(
                                 backgroundColor: const Color(0xFF1A1A1A),
                                 side: const BorderSide(color: AppColors.border2),
@@ -1355,7 +1638,12 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
   }
 
   Widget _buildActiveBody() {
+    final vm = context.watch<FleetViewModel>();
+    final acc = _acceptedQuote(vm);
     final eta = _fleetEtaLabel(widget.job);
+    final mechName = acc?.mechanicName ?? _fleetMechanicLabel(widget.job);
+    final mechPhoto = _safeMechanicPhotoUrl(acc?.profilePhotoUrl);
+    final mechPhone = acc?.mechanicPhone;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1437,7 +1725,7 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: CachedNetworkImage(
-                  imageUrl: AppAssets.mechanicPortrait,
+                  imageUrl: mechPhoto,
                   width: 48,
                   height: 48,
                   fit: BoxFit.cover,
@@ -1458,23 +1746,25 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                       children: [
                         Flexible(
                           child: Text(
-                            _fleetMechanicLabel(widget.job),
+                            mechName,
                             style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.green.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: AppColors.green.withValues(alpha: 0.30)),
+                        if (acc != null && acc.verified) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.green.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: AppColors.green.withValues(alpha: 0.30)),
+                            ),
+                            child: const Text(
+                              'VERIFIED',
+                              style: TextStyle(color: AppColors.green, fontSize: 8, fontWeight: FontWeight.w900),
+                            ),
                           ),
-                          child: const Text(
-                            'VERIFIED',
-                            style: TextStyle(color: AppColors.green, fontSize: 8, fontWeight: FontWeight.w900),
-                          ),
-                        ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -1482,23 +1772,47 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                       children: [
                         Icon(Icons.star_rounded, color: AppColors.primary, size: 14),
                         const SizedBox(width: 4),
-                        Text('4.9', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
-                        Text(' · 184 jobs', style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                        Text(
+                          acc != null ? acc.mechanicRating.toStringAsFixed(1) : '4.9',
+                          style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          acc != null ? ' · ${acc.jobsDone} jobs' : ' · 184 jobs',
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                        ),
                       ],
                     ),
                   ],
                 ),
               ),
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.10),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: mechPhone != null && mechPhone.isNotEmpty
+                      ? () async {
+                          final uri = Uri.parse('tel:${mechPhone.replaceAll(RegExp(r'\s+'), '')}');
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri);
+                          }
+                        }
+                      : null,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.30)),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.30)),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.phone_rounded,
+                      color: AppColors.primary.withValues(alpha: mechPhone != null && mechPhone.isNotEmpty ? 1 : 0.35),
+                      size: 18,
+                    ),
+                  ),
                 ),
-                alignment: Alignment.center,
-                child: Icon(Icons.phone_rounded, color: AppColors.primary, size: 18),
               ),
             ],
           ),
@@ -1560,7 +1874,9 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
   Widget _buildCancelLayer() {
     return Positioned.fill(
       child: GestureDetector(
-        onTap: () => setState(() => _cancelOpen = false),
+        onTap: () {
+          if (!_cancelSubmitting) _dismissCancelSheet();
+        },
         behavior: HitTestBehavior.opaque,
         child: ColoredBox(
           color: Colors.black.withValues(alpha: 0.85),
@@ -1588,24 +1904,68 @@ class _FleetDashboardJobOverlayState extends State<_FleetDashboardJobOverlay> {
                           : 'You can cancel this booking from the dashboard.',
                       style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.35),
                     ),
+                    if (_cancelErr != null && _cancelErr!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _cancelErr!,
+                        style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: () {
-                        setState(() => _cancelOpen = false);
-                        widget.onClose();
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Job cancelled (demo)')));
-                      },
+                      onPressed: _cancelSubmitting
+                          ? null
+                          : () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final vm = context.read<FleetViewModel>();
+                              final jobId = widget.job.backendId?.trim();
+                              if (jobId == null || jobId.isEmpty) {
+                                messenger.showSnackBar(
+                                  const SnackBar(content: Text('This job cannot be cancelled from the app (no server id).')),
+                                );
+                                _dismissCancelSheet();
+                                return;
+                              }
+                              setState(() {
+                                _cancelSubmitting = true;
+                                _cancelErr = null;
+                              });
+                              try {
+                                await vm.cancelFleetJob(jobId);
+                                if (!mounted) return;
+                                _dismissCancelSheet();
+                                vm.clearJobQuotes();
+                                widget.onClose();
+                                await vm.refresh();
+                                if (!mounted) return;
+                                messenger.showSnackBar(const SnackBar(content: Text('Job cancelled')));
+                              } catch (e) {
+                                if (!mounted) return;
+                                setState(() {
+                                  _cancelSubmitting = false;
+                                  _cancelErr = e.toString();
+                                });
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.red,
                         foregroundColor: Colors.white,
+                        disabledBackgroundColor: AppColors.red.withValues(alpha: 0.45),
+                        disabledForegroundColor: Colors.white.withValues(alpha: 0.75),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text('Confirm cancellation', style: TextStyle(fontWeight: FontWeight.w800)),
+                      child: _cancelSubmitting
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Confirm cancellation', style: TextStyle(fontWeight: FontWeight.w800)),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton(
-                      onPressed: () => setState(() => _cancelOpen = false),
+                      onPressed: _cancelSubmitting ? null : _dismissCancelSheet,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.textMuted,
                         side: const BorderSide(color: AppColors.border2),
@@ -1632,7 +1992,6 @@ class _FleetDashboard extends StatefulWidget {
     required this.onTracking,
     required this.onOpenNotifications,
     required this.onOpenProfile,
-    required this.onOpenChat,
   });
 
   final List<FleetJobSummary> jobs;
@@ -1640,7 +1999,6 @@ class _FleetDashboard extends StatefulWidget {
   final VoidCallback onTracking;
   final VoidCallback onOpenNotifications;
   final VoidCallback onOpenProfile;
-  final VoidCallback onOpenChat;
 
   @override
   State<_FleetDashboard> createState() => _FleetDashboardState();
@@ -1669,18 +2027,18 @@ class _FleetDashboardState extends State<_FleetDashboard> {
 
     PreferredSizeWidget dashboardAppBar() {
       return PreferredSize(
-        preferredSize: const Size.fromHeight(88),
+        preferredSize: const Size.fromHeight(92),
         child: AppBar(
           automaticallyImplyLeading: false,
           backgroundColor: _FleetDashTheme.bgBlack,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           scrolledUnderElevation: 0,
-          toolbarHeight: 88,
+          toolbarHeight: 92,
           flexibleSpace: SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -1688,6 +2046,7 @@ class _FleetDashboardState extends State<_FleetDashboard> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           'GOOD MORNING',
@@ -1696,12 +2055,13 @@ class _FleetDashboardState extends State<_FleetDashboard> {
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 1.5,
+                            height: 1.0,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 5),
                         const Text(
                           companyName,
-                          style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, height: 1.1),
+                          style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, height: 1.05),
                         ),
                       ],
                     ),
@@ -1890,12 +2250,16 @@ class _FleetDashboardState extends State<_FleetDashboard> {
                   _completionJob = j;
                   _jobSheetJob = null;
                 });
-              } else {
-                setState(() {
-                  _jobSheetJob = j;
-                  _completionJob = null;
-                });
+                return;
               }
+              if (_fleetJobOpensTrackingDetail(j)) {
+                context.read<FleetViewModel>().openTrackingJobDetail(j.backendId!.trim());
+                return;
+              }
+              setState(() {
+                _jobSheetJob = j;
+                _completionJob = null;
+              });
             },
             borderRadius: BorderRadius.circular(12),
             child: Container(
@@ -2540,13 +2904,16 @@ class _FleetDashboardState extends State<_FleetDashboard> {
               mechanic: _fleetMechanicLabel(_completionJob!),
               truckLine: _fleetTruckDisplay(_completionJob!),
               totalCost: _fleetJobPayDisplay(_completionJob!),
+              backendJobId: _completionJob!.backendId,
               onClose: () => setState(() => _completionJob = null),
             ),
           if (_jobSheetJob != null)
             _FleetDashboardJobOverlay(
               job: _jobSheetJob!,
-              onClose: () => setState(() => _jobSheetJob = null),
-              onOpenChat: widget.onOpenChat,
+              onClose: () {
+                context.read<FleetViewModel>().clearJobQuotes();
+                setState(() => _jobSheetJob = null);
+              },
             ),
         ],
       ),

@@ -37,6 +37,59 @@ class MechanicApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to update availability');
   }
 
+  /// Earnings summary: `GET /api/v1/earnings/summary`
+  Future<Map<String, dynamic>> fetchEarningsSummary({
+    required String accessToken,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/v1/earnings/summary');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to fetch earnings summary');
+  }
+
+  /// Active jobs for this mechanic: `GET /api/v1/jobs?tab=active&page=:page&limit=:limit`
+  Future<Map<String, dynamic>> fetchMyJobs({
+    required String accessToken,
+    String tab = 'active',
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/v1/jobs').replace(
+      queryParameters: {'tab': tab, 'page': '$page', 'limit': '$limit'},
+    );
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to fetch jobs');
+  }
+
+  Future<Map<String, dynamic>> fetchMyQuotes({
+    required String accessToken,
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/v1/quotes/me').replace(
+      queryParameters: {'page': '$page', 'limit': '$limit'},
+    );
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to fetch quotes');
+  }
+
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
     Map<String, dynamic> body;
     try {

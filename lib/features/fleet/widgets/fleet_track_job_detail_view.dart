@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_assets.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/models/fleet_track_job_detail.dart';
+import '../models/fleet_chat_session.dart';
 import '../viewmodel/fleet_viewmodel.dart';
 
 String _moneyStr(double amount, String currency) {
@@ -309,7 +310,19 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
             ),
             const SizedBox(height: 10),
             OutlinedButton(
-              onPressed: () => setState(() => _contactOpen = false),
+              onPressed: () {
+                setState(() => _contactOpen = false);
+                final phone = d.mechanicPhone.trim();
+                context.read<FleetViewModel>().openJobChat(
+                      FleetChatSession(
+                        mechanicName: d.mechanicName,
+                        mechanicPhone: phone.isEmpty ? null : phone,
+                        mechanicPhotoUrl: AppAssets.mechanicPortrait,
+                        jobCode: d.jobCode,
+                        truckLine: d.subtitle,
+                      ),
+                    );
+              },
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
                 side: const BorderSide(color: AppColors.border2),

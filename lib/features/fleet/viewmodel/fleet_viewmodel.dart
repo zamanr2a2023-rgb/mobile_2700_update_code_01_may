@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../data/models/fleet_job_quote.dart';
 import '../../../data/models/fleet_job_summary.dart';
 import '../../../data/models/fleet_me_profile.dart';
 import '../../../data/models/fleet_track_job_detail.dart';
@@ -8,6 +9,7 @@ import '../../../data/repositories/app_repository.dart';
 import '../../../data/services/fleet_api_service.dart';
 import '../../../data/services/users_api_service.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
+import '../models/fleet_chat_session.dart';
 
 class FleetCompletedJob {
   const FleetCompletedJob({
@@ -104,6 +106,7 @@ class FleetViewModel extends ChangeNotifier {
   bool showPaymentMethods = false;
   bool showVehicles = false;
   bool showChat = false;
+  FleetChatSession? chatSession;
   bool showNotifications = false;
 
   List<Vehicle> get vehicles => _jobs.fleetVehicles();
@@ -134,6 +137,102 @@ class FleetViewModel extends ChangeNotifier {
   FleetMeProfileUi? meProfile;
   bool meProfileLoading = false;
   String? meProfileError;
+
+  /// Quotes for the dashboard job sheet (`GET .../jobs/:id/quotes`).
+  List<FleetJobQuote> jobQuotes = const [];
+  bool jobQuotesLoading = false;
+  String? jobQuotesError;
+
+  Future<void> loadJobQuotes(String? backendJobId) async {
+    final id = (backendJobId ?? '').trim();
+    if (id.isEmpty) {
+      jobQuotes = const [];
+      jobQuotesError = null;
+      jobQuotesLoading = false;
+      notifyListeners();
+      return;
+    }
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      jobQuotesError = 'Not signed in';
+      jobQuotes = const [];
+      notifyListeners();
+      return;
+    }
+    jobQuotesLoading = true;
+    jobQuotesError = null;
+    notifyListeners();
+    try {
+      final res = await _api.fetchJobQuotes(accessToken: token, jobId: id);
+      final raw = res['data'];
+      final list = raw is List ? raw : const [];
+      final parsed = list
+          .whereType<Map>()
+          .map((m) => FleetJobQuote.fromJson(m.cast<String, dynamic>()))
+          .where((q) => q.id.isNotEmpty)
+          .toList();
+      parsed.sort((a, b) {
+        final ae = a.etaMinutes ?? 1 << 20;
+        final be = b.etaMinutes ?? 1 << 20;
+        final c = ae.compareTo(be);
+        if (c != 0) return c;
+        return b.mechanicRating.compareTo(a.mechanicRating);
+      });
+      jobQuotes = parsed;
+    } catch (e) {
+      jobQuotesError = e.toString();
+      jobQuotes = const [];
+    } finally {
+      jobQuotesLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void clearJobQuotes() {
+    jobQuotes = const [];
+    jobQuotesError = null;
+    jobQuotesLoading = false;
+    notifyListeners();
+  }
+
+  /// `PATCH /api/v1/jobs/:jobId/complete/approve`
+  Future<void> approveJobCompletion(String backendJobId) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      throw Exception('Not signed in');
+    }
+    final id = backendJobId.trim();
+    if (id.isEmpty) {
+      throw Exception('Invalid job');
+    }
+    await _api.approveJobCompletion(accessToken: token, jobId: id);
+  }
+
+  /// `PATCH /api/v1/jobs/:jobId/cancel`
+  Future<void> cancelFleetJob(String backendJobId) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      throw Exception('Not signed in');
+    }
+    final id = backendJobId.trim();
+    if (id.isEmpty) {
+      throw Exception('Invalid job');
+    }
+    await _api.cancelJob(accessToken: token, jobId: id);
+  }
+
+  /// `PATCH /api/v1/quotes/:quoteId/accept`
+  Future<void> acceptJobQuote(String quoteId) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      throw Exception('Not signed in');
+    }
+    final id = quoteId.trim();
+    if (id.isEmpty) {
+      throw Exception('Invalid quote');
+    }
+    await _api.acceptQuote(accessToken: token, quoteId: id);
+  }
 
   Future<void> loadMeProfile() async {
     final token = _auth.session?.accessToken;
@@ -437,8 +536,10 @@ class FleetViewModel extends ChangeNotifier {
   }
 
   static FleetJobSummary? _mapFleetJob(Map<String, dynamic> j) {
-    final jobCode = (j['jobCode'] as String?) ?? (j['_id'] as String?) ?? '';
-    if (jobCode.isEmpty) return null;
+    final backendId = ((j['_id'] as String?) ?? '').trim();
+    final code = ((j['jobCode'] as String?) ?? '').trim();
+    final displayId = code.isNotEmpty ? code : backendId;
+    if (displayId.isEmpty) return null;
     final title = (j['title'] as String?) ?? '';
     final urgency = (j['urgency'] as String?) ?? 'MEDIUM';
 
@@ -455,7 +556,8 @@ class FleetViewModel extends ChangeNotifier {
     final statusCfg = _toneColors(tone, fallback: urgencyCfg.fg);
 
     return FleetJobSummary(
-      id: jobCode,
+      id: displayId,
+      backendId: backendId.isNotEmpty ? backendId : null,
       truck: truck.isEmpty ? '—' : truck,
       issue: title,
       status: status,
@@ -580,13 +682,15 @@ class FleetViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void openChat() {
+  void openJobChat(FleetChatSession session) {
+    chatSession = session;
     showChat = true;
     notifyListeners();
   }
 
   void closeChat() {
     showChat = false;
+    chatSession = null;
     notifyListeners();
   }
 

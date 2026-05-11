@@ -2,14 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>GMSApiKey</key>
-	<string>AIzaSyCXbW6lUF1nBJiJQILPlS4fkVGRi1SZlxw</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>We use your location to match you with nearby jobs and update your availability.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Take photos of the breakdown so mechanics can assess the job before arrival.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Choose photos from your library to attach to the job.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -32,8 +24,16 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>GMSApiKey</key>
+	<string>AIzaSyCXbW6lUF1nBJiJQILPlS4fkVGRi1SZlxw</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Take photos of the breakdown so mechanics can assess the job before arrival.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to match you with nearby jobs and update your availability.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose photos from your library to attach to the job.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -2,6 +2,7 @@
 class FleetJobSummary {
   const FleetJobSummary({
     required this.id,
+    this.backendId,
     required this.truck,
     required this.issue,
     required this.status,
@@ -12,7 +13,11 @@ class FleetJobSummary {
     required this.statusBgHex,
   });
 
+  /// Human-readable job code (e.g. TF-3302). Shown in UI.
   final String id;
+
+  /// Mongo/backend id for `GET /api/v1/jobs/:id/quotes` etc. Null for local demo rows.
+  final String? backendId;
   final String truck;
   final String issue;
   final String status;

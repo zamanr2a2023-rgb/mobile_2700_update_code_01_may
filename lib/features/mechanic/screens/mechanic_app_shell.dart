@@ -1040,27 +1040,6 @@ class _MechanicFeedSheets {
   }
 }
 
-enum _QuoteStatus { waiting, accepted, expired }
-
-class _QuoteItem {
-  const _QuoteItem({
-    required this.id,
-    required this.truck,
-    required this.issue,
-    required this.amount,
-    required this.status,
-    required this.submitted,
-    required this.expiry,
-  });
-
-  final String id;
-  final String truck;
-  final String issue;
-  final String amount;
-  final _QuoteStatus status;
-  final String submitted;
-  final String? expiry;
-}
 
 class _MyQuotes extends StatefulWidget {
   const _MyQuotes({required this.onBack});
@@ -1074,83 +1053,48 @@ class _MyQuotes extends StatefulWidget {
 class _MyQuotesState extends State<_MyQuotes> {
   String _activeTab = 'ALL';
 
-  static const _quotes = <_QuoteItem>[
-    _QuoteItem(
-      id: 'TF-8821',
-      truck: 'Tautliner · CA 456-789',
-      issue: 'Engine overheating',
-      amount: '£165',
-      status: _QuoteStatus.waiting,
-      submitted: '12 min ago',
-      expiry: '18 min',
-    ),
-    _QuoteItem(
-      id: 'TF-8810',
-      truck: 'Rigid 8T · GP 221-560',
-      issue: 'Fuel system fault',
-      amount: '£185',
-      status: _QuoteStatus.accepted,
-      submitted: '2 hrs ago',
-      expiry: null,
-    ),
-    _QuoteItem(
-      id: 'TF-8803',
-      truck: 'Tanker · KZN 55-789',
-      issue: 'Air brake fault',
-      amount: '£255',
-      status: _QuoteStatus.expired,
-      submitted: '5 hrs ago',
-      expiry: null,
-    ),
-    _QuoteItem(
-      id: 'TF-8797',
-      truck: 'Flatbed · WC 334-112',
-      issue: 'Tyre replacement',
-      amount: '£70',
-      status: _QuoteStatus.accepted,
-      submitted: 'Yesterday',
-      expiry: null,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MechanicViewModel>().loadMyQuotes();
+    });
+  }
 
-  static ({Color fg, Color bg, Color border, String label}) _statusCfg(_QuoteStatus status) {
-    return switch (status) {
-      _QuoteStatus.waiting => (
+  static ({Color fg, Color bg, Color border, String label}) _statusCfg(String rawStatus) {
+    return switch (rawStatus) {
+      'WAITING' => (
           fg: AppColors.primary,
           bg: AppColors.primary.withValues(alpha: 0.10),
           border: AppColors.primary.withValues(alpha: 0.30),
           label: 'Waiting',
         ),
-      _QuoteStatus.accepted => (
+      'ACCEPTED' => (
           fg: AppColors.green,
           bg: AppColors.green.withValues(alpha: 0.10),
           border: AppColors.green.withValues(alpha: 0.30),
-          label: 'Accepted ✓',
+          label: 'Accepted \u2713',
         ),
-      _QuoteStatus.expired => (
+      _ => (
           fg: AppColors.textMuted,
           bg: AppColors.textMuted.withValues(alpha: 0.10),
           border: AppColors.textMuted.withValues(alpha: 0.20),
-          label: 'Expired',
+          label: _capitalise(rawStatus),
         ),
     };
   }
 
-  List<_QuoteItem> get _filtered {
-    if (_activeTab == 'ALL') return _quotes;
-    final status = switch (_activeTab) {
-      'WAITING' => _QuoteStatus.waiting,
-      'ACCEPTED' => _QuoteStatus.accepted,
-      'EXPIRED' => _QuoteStatus.expired,
-      _ => null,
-    };
-    if (status == null) return _quotes;
-    return _quotes.where((q) => q.status == status).toList();
+  static String _capitalise(String s) =>
+      s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1).toLowerCase()}';
+
+  List<MechanicMyQuote> _filtered(List<MechanicMyQuote> all) {
+    if (_activeTab == 'ALL') return all;
+    return all.where((q) => q.status == _activeTab).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final vm = context.read<MechanicViewModel>();
+    final vm = context.watch<MechanicViewModel>();
     final tabs = const ['ALL', 'WAITING', 'ACCEPTED', 'EXPIRED'];
 
     Widget tabButton(String t) {
@@ -1201,112 +1145,182 @@ class _MyQuotesState extends State<_MyQuotes> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-            itemCount: _filtered.length,
-            itemBuilder: (context, i) {
-              final q = _filtered[i];
-              final cfg = _statusCfg(q.status);
-              final accepted = q.status == _QuoteStatus.accepted;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Ink(
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: InkWell(
-                    onTap: accepted ? () => vm.setTab('my-jobs') : null,
-                    borderRadius: BorderRadius.circular(14),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      q.id,
-                                      style: const TextStyle(
-                                        color: AppColors.textMuted,
-                                        fontSize: 10,
-                                        fontFamily: 'monospace',
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      q.truck,
-                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: cfg.bg,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: cfg.border),
-                                ),
-                                child: Text(
-                                  cfg.label,
-                                  style: TextStyle(color: cfg.fg, fontSize: 9, fontWeight: FontWeight.w900),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Text(q.issue, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Text(
-                                q.amount,
-                                style: const TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w900),
-                              ),
-                              if (q.expiry != null) ...[
-                                const SizedBox(width: 12),
-                                const Icon(Icons.timer_outlined, size: 14, color: AppColors.orange),
-                                const SizedBox(width: 4),
-                                Text(
-                                  q.expiry!,
-                                  style: const TextStyle(color: AppColors.orange, fontSize: 10, fontWeight: FontWeight.w700),
-                                ),
-                              ],
-                              const Spacer(),
-                              Text(q.submitted, style: const TextStyle(color: AppColors.textHint, fontSize: 10)),
-                            ],
-                          ),
-                          if (accepted) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: AppColors.green.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: AppColors.green.withValues(alpha: 0.20)),
-                              ),
-                              child: const Text(
-                                'Accepted! Tap to view active job',
-                                style: TextStyle(color: AppColors.green, fontSize: 10, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                          ],
-                        ],
+          child: Builder(builder: (context) {
+            if (vm.myQuotesLoading) {
+              return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+            }
+            if (vm.myQuotesError != null) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.error_outline, color: AppColors.textMuted, size: 40),
+                      const SizedBox(height: 12),
+                      Text(
+                        vm.myQuotesError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                       ),
-                    ),
+                      const SizedBox(height: 16),
+                      OutlinedButton(
+                        onPressed: vm.loadMyQuotes,
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.primary),
+                          foregroundColor: AppColors.primary,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
                   ),
                 ),
               );
-            },
-          ),
+            }
+            final items = _filtered(vm.myQuotes);
+            if (items.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.receipt_long_outlined, color: AppColors.textMuted, size: 48),
+                    const SizedBox(height: 12),
+                    Text(
+                      _activeTab == 'ALL' ? 'No quotes yet' : 'No ${_capitalise(_activeTab)} quotes',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              itemCount: items.length,
+              itemBuilder: (context, i) {
+                final q = items[i];
+                final cfg = _statusCfg(q.status);
+                final tappable = q.canOpenActiveJob;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      color: AppColors.card,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: InkWell(
+                      onTap: tappable ? () => vm.setTab('my-jobs') : null,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        q.jobCode,
+                                        style: const TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 10,
+                                          fontFamily: 'monospace',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        q.truckLine,
+                                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: cfg.bg,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: cfg.border),
+                                  ),
+                                  child: Text(
+                                    cfg.label,
+                                    style: TextStyle(color: cfg.fg, fontSize: 9, fontWeight: FontWeight.w900),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Text(q.issue, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Text(
+                                  q.amountDisplay,
+                                  style: const TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w900),
+                                ),
+                                if (q.etaLabel != null && q.etaLabel!.isNotEmpty) ...[
+                                  const SizedBox(width: 12),
+                                  const Icon(Icons.timer_outlined, size: 14, color: AppColors.orange),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    q.etaLabel!,
+                                    style: const TextStyle(color: AppColors.orange, fontSize: 10, fontWeight: FontWeight.w700),
+                                  ),
+                                ],
+                                const Spacer(),
+                                Text(q.submittedLabel, style: const TextStyle(color: AppColors.textHint, fontSize: 10)),
+                              ],
+                            ),
+                            // Accepted banner — text driven by API summaryLine
+                            if (tappable && q.summaryLine != null) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.green.withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppColors.green.withValues(alpha: 0.20)),
+                                ),
+                                child: Text(
+                                  q.summaryLine!,
+                                  style: const TextStyle(color: AppColors.green, fontSize: 10, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                            // Resubmit action for expired / declined quotes
+                            if (q.canResubmit) ...[
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  onPressed: () {/* TODO: resubmit flow */},
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: AppColors.primary.withValues(alpha: 0.50)),
+                                    foregroundColor: AppColors.primary,
+                                    padding: const EdgeInsets.symmetric(vertical: 9),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  child: const Text(
+                                    'Resubmit Quote',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          }),
         ),
       ],
     );
@@ -2192,99 +2206,78 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
   }
 }
 
-enum _MyJobStatus { active, scheduled, inProgress }
-
-class _MyJobListItem {
-  const _MyJobListItem({
-    required this.id,
-    required this.truck,
-    required this.fleet,
-    required this.issue,
-    required this.distance,
-    required this.pay,
-    required this.status,
-    this.scheduledFor,
-  });
-
-  final String id;
-  final String truck;
-  final String fleet;
-  final String issue;
-  final String distance;
-  final String pay;
-  final _MyJobStatus status;
-  final String? scheduledFor;
-}
-
-class _MyJobsPage extends StatelessWidget {
+class _MyJobsPage extends StatefulWidget {
   const _MyJobsPage({required this.onTracker});
 
   final VoidCallback onTracker;
 
+  @override
+  State<_MyJobsPage> createState() => _MyJobsPageState();
+}
+
+class _MyJobsPageState extends State<_MyJobsPage> {
   static const _kBlue = Color(0xFF60A5FA);
+  static const _kYellow = Color(0xFFFACC15);
+  static const _kAmber = Color(0xFFF59E0B);
 
-  static const _jobs = <_MyJobListItem>[
-    _MyJobListItem(
-      id: 'TF-8810',
-      truck: 'Tautliner · GP 221-560',
-      fleet: 'Logistix Transport',
-      issue: 'Fuel system fault — vehicle stalled on N14',
-      distance: '2.1 mi',
-      pay: '£185',
-      status: _MyJobStatus.active,
-    ),
-    _MyJobListItem(
-      id: 'TF-8797',
-      truck: 'Flatbed · WC 678-123',
-      fleet: 'Atlas Haulage Ltd',
-      issue: 'Right rear dual tyre blowout, roadside change needed',
-      distance: '12.6 mi',
-      pay: '£95',
-      status: _MyJobStatus.scheduled,
-      scheduledFor: 'Tomorrow · 09:00',
-    ),
-    _MyJobListItem(
-      id: 'TF-8803',
-      truck: 'Tanker · KZN 44-221',
-      fleet: 'Northern Fuels Ltd',
-      issue: 'Air brake fault — vehicle stranded on motorway',
-      distance: '9.3 mi',
-      pay: '£310',
-      status: _MyJobStatus.inProgress,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MechanicViewModel>().loadMyJobs();
+    });
+  }
 
-  static ({String label, Color dot, Color fg, Color bg, Color border, bool pulse}) _statusCfg(_MyJobStatus s) {
-    return switch (s) {
-      _MyJobStatus.active => (
-          label: 'READY TO START',
+  ({String label, Color dot, Color fg, Color bg, Color border, bool pulse})
+      _statusCfg(String tone, String label) {
+    return switch (tone) {
+      'green' => (
+          label: label,
           dot: AppColors.green,
           fg: AppColors.green,
           bg: AppColors.green.withValues(alpha: 0.10),
           border: AppColors.green.withValues(alpha: 0.30),
           pulse: false,
         ),
-      _MyJobStatus.scheduled => (
-          label: 'SCHEDULED',
+      'blue' => (
+          label: label,
           dot: _kBlue,
           fg: _kBlue,
           bg: _kBlue.withValues(alpha: 0.10),
           border: _kBlue.withValues(alpha: 0.30),
           pulse: false,
         ),
-      _MyJobStatus.inProgress => (
-          label: 'IN PROGRESS',
-          dot: AppColors.orange,
-          fg: AppColors.orange,
-          bg: AppColors.orange.withValues(alpha: 0.10),
-          border: AppColors.orange.withValues(alpha: 0.30),
+      'amber' => (
+          label: label,
+          dot: _kAmber,
+          fg: _kAmber,
+          bg: _kAmber.withValues(alpha: 0.10),
+          border: _kAmber.withValues(alpha: 0.30),
           pulse: true,
+        ),
+      'yellow' => (
+          label: label,
+          dot: _kYellow,
+          fg: _kYellow,
+          bg: _kYellow.withValues(alpha: 0.10),
+          border: _kYellow.withValues(alpha: 0.30),
+          pulse: false,
+        ),
+      _ => (
+          label: label,
+          dot: AppColors.textMuted,
+          fg: AppColors.textMuted,
+          bg: AppColors.textMuted.withValues(alpha: 0.08),
+          border: AppColors.textMuted.withValues(alpha: 0.20),
+          pulse: false,
         ),
     };
   }
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<MechanicViewModel>();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2303,155 +2296,224 @@ class _MyJobsPage extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '${_jobs.length} accepted jobs',
+                vm.myJobsLoading
+                    ? 'Loading…'
+                    : '${vm.myJobsTotalActive} accepted job${vm.myJobsTotalActive == 1 ? '' : 's'}',
                 style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.85), fontSize: 11),
               ),
             ],
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-            itemCount: _jobs.length,
-            itemBuilder: (context, i) {
-              final job = _jobs[i];
-              final cfg = _statusCfg(job.status);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Material(
-                  color: AppColors.card,
-                  borderRadius: BorderRadius.circular(14),
-                  child: InkWell(
-                    onTap: onTracker,
-                    borderRadius: BorderRadius.circular(14),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border),
+          child: Builder(builder: (context) {
+            if (vm.myJobsLoading) {
+              return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+            }
+            if (vm.myJobsError != null) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.error_outline, color: AppColors.textMuted, size: 40),
+                      const SizedBox(height: 12),
+                      Text(
+                        vm.myJobsError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        job.id,
-                                        style: const TextStyle(
-                                          color: AppColors.textMuted,
-                                          fontSize: 10,
-                                          fontFamily: 'monospace',
+                      const SizedBox(height: 16),
+                      OutlinedButton(
+                        onPressed: vm.loadMyJobs,
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.primary),
+                          foregroundColor: AppColors.primary,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            if (vm.myActiveJobs.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.work_outline, color: AppColors.textMuted, size: 48),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'No active jobs',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              itemCount: vm.myActiveJobs.length,
+              itemBuilder: (context, i) {
+                final job = vm.myActiveJobs[i];
+                final cfg = _statusCfg(job.statusTone, job.statusLabel);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Material(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: widget.onTracker,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          job.jobCode,
+                                          style: const TextStyle(
+                                            color: AppColors.textMuted,
+                                            fontSize: 10,
+                                            fontFamily: 'monospace',
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        job.truck,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w900,
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          job.truck,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w900,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        job.fleet,
-                                        style: TextStyle(
-                                          color: AppColors.textSecondary.withValues(alpha: 0.75),
-                                          fontSize: 11,
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          job.fleet,
+                                          style: TextStyle(
+                                            color: AppColors.textSecondary.withValues(alpha: 0.75),
+                                            fontSize: 11,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: cfg.bg,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: cfg.border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      _StatusDot(color: cfg.dot, pulse: cfg.pulse),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        cfg.label,
-                                        style: TextStyle(
-                                          color: cfg.fg,
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 0.6,
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: cfg.bg,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: cfg.border),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _StatusDot(color: cfg.dot, pulse: cfg.pulse),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          cfg.label,
+                                          style: TextStyle(
+                                            color: cfg.fg,
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 0.6,
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              job.issue,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white, fontSize: 12),
-                            ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                Text(
-                                  job.pay,
-                                  style: const TextStyle(
-                                    color: AppColors.primary,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                                if (job.scheduledFor != null) ...[
-                                  const SizedBox(width: 12),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.access_time_rounded, size: 14, color: cfg.fg),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        job.scheduledFor!,
-                                        style: TextStyle(
-                                          color: cfg.fg,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ],
-                                const Spacer(),
-                                Icon(Icons.location_on_outlined, size: 14, color: AppColors.textMuted),
-                                const SizedBox(width: 2),
-                                Text(
-                                  job.distance,
-                                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
-                                ),
-                                const SizedBox(width: 2),
-                                Icon(Icons.chevron_right, size: 18, color: AppColors.textHint),
-                              ],
-                            ),
-                          ],
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                job.issue,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Text(
+                                    job.pay,
+                                    style: const TextStyle(
+                                      color: AppColors.primary,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  if (job.scheduledForLabel != null) ...[
+                                    const SizedBox(width: 12),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.access_time_rounded, size: 14, color: cfg.fg),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          job.scheduledForLabel!,
+                                          style: TextStyle(
+                                            color: cfg.fg,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ] else if (job.etaMinutes != null && job.etaMinutes! > 0) ...[
+                                    const SizedBox(width: 12),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.timer_outlined, size: 14, color: cfg.fg),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'ETA ${job.etaMinutes} min',
+                                          style: TextStyle(
+                                            color: cfg.fg,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  const Spacer(),
+                                  if (job.distanceLabel != null) ...[
+                                    Icon(Icons.location_on_outlined, size: 14, color: AppColors.textMuted),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      job.distanceLabel!,
+                                      style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                                    ),
+                                    const SizedBox(width: 2),
+                                  ],
+                                  Icon(Icons.chevron_right, size: 18, color: AppColors.textHint),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              );
-            },
-          ),
+                );
+              },
+            );
+          }),
         ),
       ],
     );
@@ -3842,14 +3904,6 @@ class _EarnJob {
   final String hours;
 }
 
-class _BarMonth {
-  const _BarMonth({required this.month, required this.net, this.current = false});
-
-  final String month;
-  final int net;
-  final bool current;
-}
-
 class _MechanicEarnings extends StatefulWidget {
   const _MechanicEarnings({required this.onBack});
 
@@ -3860,6 +3914,7 @@ class _MechanicEarnings extends StatefulWidget {
 }
 
 class _MechanicEarningsState extends State<_MechanicEarnings> {
+  // Completed jobs list remains demo until a dedicated jobs-history API is added.
   static const _jobs = <_EarnJob>[
     _EarnJob(id: 'TF-8810', truck: 'Rigid 8T · GP 221-560', issue: 'Fuel system fault', fleet: 'Logistix Transport', date: '7 Mar 2026', gross: 185, net: 163, rating: 5, hours: '1h 45m'),
     _EarnJob(id: 'TF-8797', truck: 'Flatbed · WC 334-112', issue: 'Tyre replacement x2', fleet: 'Peak Haulage Ltd', date: '5 Mar 2026', gross: 140, net: 123, rating: 5, hours: '55m'),
@@ -3869,20 +3924,15 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
     _EarnJob(id: 'TF-8744', truck: 'Flatbed · GP 551-889', issue: 'Suspension repair', fleet: 'Peak Haulage Ltd', date: '21 Feb 2026', gross: 310, net: 273, rating: 5, hours: '3h 05m'),
   ];
 
-  static const _bars = <_BarMonth>[
-    _BarMonth(month: 'Oct', net: 820),
-    _BarMonth(month: 'Nov', net: 1140),
-    _BarMonth(month: 'Dec', net: 960),
-    _BarMonth(month: 'Jan', net: 1380),
-    _BarMonth(month: 'Feb', net: 1050),
-    _BarMonth(month: 'Mar', net: 480, current: true),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<MechanicViewModel>().loadEarnings();
+    });
+  }
 
-  int get _marchGross => _jobs.where((j) => j.date.contains('Mar')).fold<int>(0, (s, j) => s + j.gross);
-  int get _marchNet => _jobs.where((j) => j.date.contains('Mar')).fold<int>(0, (s, j) => s + j.net);
-  int get _allTimeNet => _jobs.fold<int>(0, (s, j) => s + j.net);
-
-  static String _fmtBarValue(int net) => net >= 1000 ? '£${(net / 1000).toStringAsFixed(1)}k' : '£$net';
+  static String _fmtMoney(int v) => v >= 1000 ? '£${(v / 1000).toStringAsFixed(1)}k' : '£$v';
 
   Widget _summaryCard(String value, String label, String sub) {
     return Container(
@@ -3908,9 +3958,11 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
     );
   }
 
-  Widget _barChart() {
-    final maxBar = _bars.map((b) => b.net).reduce(math.max);
+  Widget _barChart(List<MechanicBarMonth> bars) {
     const chartH = 56.0;
+    // Guard: if all bars are zero, use a minimum scale so bars still render
+    final rawMax = bars.isEmpty ? 1 : bars.map((b) => b.net).reduce(math.max);
+    final maxBar = rawMax > 0 ? rawMax : 1;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -3935,10 +3987,10 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
           ),
           const SizedBox(height: 14),
           SizedBox(
-            height: 90,
+            height: 96,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
-              children: _bars.map((bar) {
+              children: bars.map((bar) {
                 final pct = (bar.net / maxBar) * 100;
                 final h = chartH * (math.max(pct, 4) / 100);
                 final cur = bar.current;
@@ -3949,7 +4001,7 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         Text(
-                          _fmtBarValue(bar.net),
+                          _fmtMoney(bar.net),
                           style: TextStyle(
                             fontSize: 8,
                             fontWeight: FontWeight.w900,
@@ -3974,7 +4026,7 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          bar.month,
+                          bar.shortLabel,
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
@@ -4208,6 +4260,10 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<MechanicViewModel>();
+    final summary = vm.earningsSummary;
+    final monthLabel = summary?.currentMonthLabel ?? 'This month';
+
     return ColoredBox(
       color: AppColors.bg,
       child: Column(
@@ -4258,17 +4314,54 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
               children: [
+                if (vm.earningsLoading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+                  )
+                else if (vm.earningsError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: AppColors.textMuted, size: 14),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            vm.earningsError!,
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: vm.loadEarnings,
+                          child: const Text('Retry', style: TextStyle(color: AppColors.primary, fontSize: 11)),
+                        ),
+                      ],
+                    ),
+                  ),
                 Row(
                   children: [
-                    Expanded(child: _summaryCard('£$_marchGross', 'Mar Gross', 'Before platform fee')),
+                    Expanded(child: _summaryCard(
+                      _fmtMoney(summary?.monthGross ?? 0),
+                      '$monthLabel Gross',
+                      'Before platform fee',
+                    )),
                     const SizedBox(width: 8),
-                    Expanded(child: _summaryCard('£$_marchNet', 'Mar Net', 'After 12% fee')),
+                    Expanded(child: _summaryCard(
+                      _fmtMoney(summary?.monthNet ?? 0),
+                      '$monthLabel Net',
+                      'After 12% fee',
+                    )),
                     const SizedBox(width: 8),
-                    Expanded(child: _summaryCard('£$_allTimeNet', 'All-time', 'Net since Mar 2026')),
+                    Expanded(child: _summaryCard(
+                      _fmtMoney(summary?.allTimeNet ?? 0),
+                      'All-time',
+                      'Net since Mar 2026',
+                    )),
                   ],
                 ),
                 const SizedBox(height: 16),
-                _barChart(),
+                _barChart(summary?.bars ?? []),
                 const SizedBox(height: 20),
                 Row(
                   children: [

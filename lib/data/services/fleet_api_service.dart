@@ -65,6 +65,80 @@ class FleetApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to fetch job');
   }
 
+  /// Quotes for a job: `GET /api/v1/jobs/:jobId/quotes`
+  Future<Map<String, dynamic>> fetchJobQuotes({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    final id = jobId.trim();
+    final uri = Uri.parse('$_baseUrl${ApiConstants.jobsPath}/${Uri.encodeComponent(id)}/quotes');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to fetch quotes');
+  }
+
+  /// Fleet cancels a job: `PATCH /api/v1/jobs/:jobId/cancel`
+  Future<Map<String, dynamic>> cancelJob({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    final id = jobId.trim();
+    final uri = Uri.parse('$_baseUrl${ApiConstants.jobsPath}/${Uri.encodeComponent(id)}/cancel');
+    final res = await _client.patch(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to cancel job');
+  }
+
+  /// Fleet accepts a mechanic quote: `PATCH /api/v1/quotes/:quoteId/accept`
+  Future<Map<String, dynamic>> acceptQuote({
+    required String accessToken,
+    required String quoteId,
+  }) async {
+    final id = quoteId.trim();
+    final uri = Uri.parse('$_baseUrl/api/v1/quotes/${Uri.encodeComponent(id)}/accept');
+    final res = await _client.patch(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to accept quote');
+  }
+
+  /// Fleet approves completed work / releases payment: `PATCH /api/v1/jobs/:jobId/complete/approve`
+  Future<Map<String, dynamic>> approveJobCompletion({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    final id = jobId.trim();
+    final uri = Uri.parse('$_baseUrl${ApiConstants.jobsPath}/${Uri.encodeComponent(id)}/complete/approve');
+    final res = await _client.patch(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to approve completion');
+  }
+
   Future<Map<String, dynamic>> createJob({
     required String accessToken,
     required String title,
