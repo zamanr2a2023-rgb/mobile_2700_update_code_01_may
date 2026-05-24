@@ -1,6 +1,7 @@
 import '../models/fleet_job_summary.dart';
 import '../models/job_offer.dart';
 import '../models/mechanic_quote.dart';
+import '../models/forgot_password_result.dart';
 import '../models/session.dart';
 import '../models/team_member.dart';
 import '../models/vehicle.dart';
@@ -21,6 +22,9 @@ abstract class AuthRepository {
 
   /// Optional backend logout (best-effort). Send [accessToken] as `Authorization: Bearer` when present.
   Future<void> logout({String? accessToken, String? refreshToken});
+
+  /// `POST /api/v1/auth/forgot-password` — sends reset instructions to [email].
+  Future<ForgotPasswordResult> forgotPassword({required String email});
 
   /// Fleet operator registration.
   Future<void> registerFleetOperator({
@@ -100,6 +104,13 @@ class MemoryAuthRepository implements AuthRepository {
   @override
   Future<void> logout({String? accessToken, String? refreshToken}) async {
     await clearSession();
+  }
+
+  @override
+  Future<ForgotPasswordResult> forgotPassword({required String email}) async {
+    return ForgotPasswordResult(
+      message: 'If an account exists for this email, password reset instructions have been sent.',
+    );
   }
 
   @override

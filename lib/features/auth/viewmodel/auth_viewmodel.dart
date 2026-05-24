@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
+import '../../../core/services/device_token_sync_service.dart';
 import '../../../data/models/session.dart';
 import '../../../data/repositories/app_repository.dart';
 
@@ -22,12 +25,17 @@ class AuthViewModel extends ChangeNotifier {
     _session = await _authRepository.getSession();
     _bootstrapped = true;
     notifyListeners();
+    final s = _session;
+    if (s != null) {
+      unawaited(DeviceTokenSyncService.instance.syncWithSession(s));
+    }
   }
 
   Future<void> loginAs(String email, String password, UserRole role) async {
     final s = await _authRepository.login(email: email, password: password, roleHint: role);
     _session = s;
     notifyListeners();
+    unawaited(DeviceTokenSyncService.instance.syncWithSession(s));
   }
 
   /// Dev-friendly sign-in matching prototype “Sign In” without backend.
@@ -46,6 +54,7 @@ class AuthViewModel extends ChangeNotifier {
     }
     _session = null;
     registrationRole = null;
+    await DeviceTokenSyncService.instance.clearLastSync();
     notifyListeners();
   }
 

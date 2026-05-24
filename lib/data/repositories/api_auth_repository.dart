@@ -6,6 +6,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/api_constants.dart';
+import '../models/forgot_password_result.dart';
 import '../models/session.dart';
 import 'app_repository.dart';
 
@@ -211,6 +212,41 @@ class ApiAuthRepository implements AuthRepository {
     } finally {
       await clearSession();
     }
+  }
+
+  @override
+  Future<ForgotPasswordResult> forgotPassword({required String email}) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.authForgotPasswordPath}');
+    final res = await _client.post(
+      uri,
+      headers: const {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({'email': email.trim()}),
+    );
+
+    Map<String, dynamic> body;
+    try {
+      final decoded = jsonDecode(res.body);
+      body = (decoded is Map<String, dynamic>) ? decoded : <String, dynamic>{};
+    } catch (_) {
+      body = <String, dynamic>{};
+    }
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      final msg = _pickString(body, ['message', 'error', 'msg']) ??
+          'Could not send reset email (HTTP ${res.statusCode}).';
+      throw AuthException(msg);
+    }
+
+    final data = _pickObject(body, ['data']);
+    final resetToken = _pickString(data, ['resetToken', 'reset_token']);
+
+    final message = _pickString(body, ['message', 'msg']) ??
+        'If an account exists for this email, password reset instructions have been sent.';
+
+    return ForgotPasswordResult(message: message, resetToken: resetToken);
   }
 
   @override

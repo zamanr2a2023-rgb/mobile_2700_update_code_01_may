@@ -75,10 +75,8 @@ class JobsApiService {
     }
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      final msg = (body['message'] is String && (body['message'] as String).trim().isNotEmpty)
-          ? body['message'] as String
-          : 'Failed to create job (HTTP ${res.statusCode}).';
-      throw JobsApiException(msg);
+      final raw = body['message'] is String ? body['message'] as String : null;
+      throw JobsApiException(JobsApiException.userMessage(raw, statusCode: res.statusCode));
     }
 
     return body;
@@ -88,6 +86,37 @@ class JobsApiService {
 class JobsApiException implements Exception {
   JobsApiException(this.message);
   final String message;
+
+  /// Turns backend/debug text into a short message suitable for SnackBars.
+  static String userMessage(String? raw, {int? statusCode}) {
+    if (raw == null || raw.trim().isEmpty) {
+      if (statusCode != null) {
+        return 'Could not post your job (error $statusCode). Please try again.';
+      }
+      return 'Could not post your job. Please try again.';
+    }
+
+    var msg = raw.trim();
+    final debugIdx = msg.indexOf(' (content-type=');
+    if (debugIdx > 0) msg = msg.substring(0, debugIdx).trim();
+
+    final lower = msg.toLowerCase();
+    if (lower.contains('description') && lower.contains('required')) {
+      return 'Please describe the problem in Notes before posting.';
+    }
+    if (lower.contains('title') && lower.contains('required')) {
+      return 'Please select a job category.';
+    }
+    if (lower.contains('location') && lower.contains('required')) {
+      return 'Please set the breakdown location on the map.';
+    }
+    if (lower.contains('registration') && lower.contains('required')) {
+      return 'Please enter the vehicle registration.';
+    }
+
+    return msg;
+  }
+
   @override
   String toString() => message;
 }

@@ -415,6 +415,23 @@ class FleetApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to fetch notifications');
   }
 
+  /// Single notification (`GET /api/v1/notifications/:id`) — includes `navigation` for deep links.
+  Future<Map<String, dynamic>> fetchNotificationById({
+    required String accessToken,
+    required String notificationId,
+  }) async {
+    final id = notificationId.trim();
+    final uri = Uri.parse('$_baseUrl/api/v1/notifications/${Uri.encodeComponent(id)}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load notification');
+  }
+
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
     Map<String, dynamic> body;
     try {

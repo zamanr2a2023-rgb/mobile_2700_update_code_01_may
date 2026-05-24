@@ -65,6 +65,9 @@ abstract final class AppRouter {
       case 'mechanic-terms':
         router.go(AppRoutes.termsMechanic);
         return;
+      case 'forgot':
+        router.push(AppRoutes.forgot);
+        return;
       default:
         router.go(AppRoutes.splash);
         return;

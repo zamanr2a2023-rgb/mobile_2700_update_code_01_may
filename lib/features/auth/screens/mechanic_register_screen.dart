@@ -21,6 +21,13 @@ const _kMechanicEmployeeSkillOptions = <(String code, String label)>[
   ('BREAKDOWN_UNKNOWN', 'Diagnostics'),
 ];
 
+const _kPoundPrefix = SizedBox(
+  width: 48,
+  child: Center(
+    child: Text('£', style: TextStyle(color: AppColors.textGray, fontSize: 16, fontWeight: FontWeight.w600)),
+  ),
+);
+
 class MechanicRegisterScreen extends StatelessWidget {
   const MechanicRegisterScreen({super.key, required this.onNavigate});
 
@@ -512,14 +519,14 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
                     const SizedBox(height: 16),
                     AppInput(
                       label: 'Full Name',
-                      placeholder: 'John Smith',
+                      placeholder: 'JOHN SMITH',
                       controller: _fullName,
                       prefixIcon: const Icon(Icons.person_outline, size: 16, color: AppColors.textGray),
                     ),
                     const SizedBox(height: 16),
                     AppInput(
                       label: 'Display Name',
-                      placeholder: 'John Smith',
+                      placeholder: 'JOHN SMITH',
                       controller: _employeeDisplayName,
                       prefixIcon: const Icon(Icons.badge_outlined, size: 16, color: AppColors.textGray),
                     ),
@@ -618,7 +625,7 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
                     const SizedBox(height: 12),
                     AppInput(
                       label: 'Full Name',
-                      placeholder: 'Themba Dlamini',
+                      placeholder: 'JOHN SMITH',
                       controller: _fullName,
                       prefixIcon: const Icon(Icons.person_outline, size: 16, color: AppColors.textGray),
                     ),
@@ -632,7 +639,7 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
                     const SizedBox(height: 16),
                     AppInput(
                       label: 'Email Address',
-                      placeholder: 'themba@fix.co.za',
+                      placeholder: 'john@swiftmechanics.co.uk',
                       controller: _email,
                       keyboardType: TextInputType.emailAddress,
                       prefixIcon: const Icon(Icons.email_outlined, size: 16, color: AppColors.textGray),
@@ -640,43 +647,43 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
                     const SizedBox(height: 16),
                     AppInput(
                       label: 'Phone Number',
-                      placeholder: '+27 82 000 0000',
+                      placeholder: '+44 7700 900000',
                       controller: _phone,
                       keyboardType: TextInputType.phone,
                       prefixIcon: const Icon(Icons.phone_outlined, size: 16, color: AppColors.textGray),
                     ),
                     const SizedBox(height: 24),
-                    const Text('RATES (ZAR)', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 2)),
+                    const Text('RATES (£)', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 2)),
                     const SizedBox(height: 12),
                     AppInput(
                       label: 'Call-out Charge',
-                      placeholder: '350',
+                      placeholder: '80',
                       controller: _callOutFee,
                       keyboardType: TextInputType.number,
-                      prefixIcon: const Icon(Icons.attach_money, size: 16, color: AppColors.textGray),
+                      prefixIcon: _kPoundPrefix,
                     ),
                     const SizedBox(height: 16),
                     AppInput(
                       label: 'Hourly Rate',
-                      placeholder: '850',
+                      placeholder: '95',
                       controller: _hourlyRate,
                       keyboardType: TextInputType.number,
-                      prefixIcon: const Icon(Icons.attach_money, size: 16, color: AppColors.textGray),
+                      prefixIcon: _kPoundPrefix,
                     ),
                     const SizedBox(height: 16),
                     AppInput(
                       label: 'Emergency Surcharge',
-                      placeholder: '500',
+                      placeholder: '150',
                       controller: _emergencySurcharge,
                       keyboardType: TextInputType.number,
-                      prefixIcon: const Icon(Icons.flash_on, size: 16, color: AppColors.error),
+                      prefixIcon: _kPoundPrefix,
                     ),
                     const SizedBox(height: 24),
                     const Text('SERVICE AREA', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 2)),
                     const SizedBox(height: 12),
                     AppInput(
                       label: 'Base Postcode',
-                      placeholder: 'e.g. 1685',
+                      placeholder: 'e.g. SW1A 1AA',
                       controller: _basePostcode,
                       prefixIcon: const Icon(Icons.location_on_outlined, size: 16, color: AppColors.textGray),
                     ),

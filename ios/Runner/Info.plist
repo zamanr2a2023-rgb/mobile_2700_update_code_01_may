@@ -34,6 +34,11 @@
 	<string>We use your location to match you with nearby jobs and update your availability.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose photos from your library to attach to the job.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
