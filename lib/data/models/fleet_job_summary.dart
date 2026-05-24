@@ -11,6 +11,8 @@ class FleetJobSummary {
     required this.urgencyBgHex,
     required this.statusColorHex,
     required this.statusBgHex,
+    this.mechanic,
+    this.pay,
   });
 
   /// Human-readable job code (e.g. TF-3302). Shown in UI.
@@ -26,4 +28,10 @@ class FleetJobSummary {
   final int urgencyBgHex;
   final int statusColorHex;
   final int statusBgHex;
+
+  /// `assignedMechanic.displayName` from the API, e.g. "James Mitchell".
+  final String? mechanic;
+
+  /// Formatted payout string, e.g. "£275". Derived from finalAmount/acceptedAmount/estimatedPayout.
+  final String? pay;
 }

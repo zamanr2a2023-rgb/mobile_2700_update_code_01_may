@@ -25,6 +25,114 @@ class FleetApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to fetch dashboard');
   }
 
+  Future<Map<String, dynamic>> fetchFleetVehicles({
+    required String accessToken,
+  }) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.fleetVehiclesPath}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load vehicles');
+  }
+
+  /// `GET /api/v1/fleet/vehicles/:vehicleId` — vehicle + recentJobs + meta.
+  Future<Map<String, dynamic>> fetchFleetVehicleById({
+    required String accessToken,
+    required String vehicleId,
+  }) async {
+    final id = vehicleId.trim();
+    final uri = Uri.parse('$_baseUrl${ApiConstants.fleetVehiclesPath}/${Uri.encodeComponent(id)}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load vehicle');
+  }
+
+  /// `POST /api/v1/fleet/vehicles`
+  Future<Map<String, dynamic>> createFleetVehicle({
+    required String accessToken,
+    required String registration,
+    required String type,
+    required String make,
+    required String model,
+    String? vin,
+    int? currentMileageKm,
+  }) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.fleetVehiclesPath}');
+    final body = <String, dynamic>{
+      'registration': registration.trim(),
+      'type': type.trim(),
+      'make': make.trim(),
+      'model': model.trim(),
+    };
+    final v = vin?.trim();
+    if (v != null && v.isNotEmpty) {
+      body['vin'] = v;
+    }
+    if (currentMileageKm != null && currentMileageKm > 0) {
+      body['currentMileageKm'] = currentMileageKm;
+    }
+    final res = await _client.post(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(body),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to add vehicle');
+  }
+
+  /// `PATCH /api/v1/fleet/vehicles/:vehicleId`
+  Future<Map<String, dynamic>> patchFleetVehicle({
+    required String accessToken,
+    required String vehicleId,
+    required String registration,
+    required String make,
+    required String model,
+    String? type,
+    int? year,
+    String? vin,
+  }) async {
+    final id = vehicleId.trim();
+    final uri = Uri.parse('$_baseUrl${ApiConstants.fleetVehiclesPath}/${Uri.encodeComponent(id)}');
+    final body = <String, dynamic>{
+      'registration': registration.trim(),
+      'make': make.trim(),
+      'model': model.trim(),
+    };
+    final t = type?.trim();
+    if (t != null && t.isNotEmpty) {
+      body['type'] = t;
+    }
+    if (year != null) {
+      body['year'] = year;
+    }
+    final v = vin?.trim();
+    if (v != null && v.isNotEmpty) {
+      body['vin'] = v;
+    }
+    final res = await _client.patch(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(body),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to update vehicle');
+  }
+
   Future<Map<String, dynamic>> fetchJobs({
     required String accessToken,
     required String tab, // active | completed
@@ -80,6 +188,91 @@ class FleetApiService {
       },
     );
     return _decodeOrThrow(res, defaultMessage: 'Failed to fetch quotes');
+  }
+
+  /// `GET /api/v1/billing/payment-methods`
+  Future<Map<String, dynamic>> fetchBillingPaymentMethods({
+    required String accessToken,
+  }) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.billingPaymentMethodsPath}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load payment methods');
+  }
+
+  /// `PATCH /api/v1/billing/payment-methods/:id/default`
+  Future<Map<String, dynamic>> setBillingPaymentMethodDefault({
+    required String accessToken,
+    required String methodId,
+  }) async {
+    final id = methodId.trim();
+    final uri = Uri.parse(
+      '$_baseUrl${ApiConstants.billingPaymentMethodsPath}/${Uri.encodeComponent(id)}/default',
+    );
+    final res = await _client.patch(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(<String, dynamic>{}),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to set default payment method');
+  }
+
+  /// `DELETE /api/v1/billing/payment-methods/:id`
+  Future<Map<String, dynamic>> deleteBillingPaymentMethod({
+    required String accessToken,
+    required String methodId,
+  }) async {
+    final id = methodId.trim();
+    final uri = Uri.parse(
+      '$_baseUrl${ApiConstants.billingPaymentMethodsPath}/${Uri.encodeComponent(id)}',
+    );
+    final res = await _client.delete(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to remove payment method');
+  }
+
+  /// Fleet rates a completed job: `POST /api/v1/fleet/reviews`
+  Future<Map<String, dynamic>> submitFleetReview({
+    required String accessToken,
+    required String jobId,
+    required int rating,
+    String? comment,
+  }) async {
+    final id = jobId.trim();
+    final payload = <String, dynamic>{
+      'jobId': id,
+      'rating': rating,
+    };
+    final c = comment?.trim();
+    if (c != null && c.isNotEmpty) {
+      payload['comment'] = c;
+    }
+
+    final uri = Uri.parse('$_baseUrl${ApiConstants.fleetReviewsPath}');
+    final res = await _client.post(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(payload),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to submit review');
   }
 
   /// Fleet cancels a job: `PATCH /api/v1/jobs/:jobId/cancel`
@@ -220,6 +413,23 @@ class FleetApiService {
       },
     );
     return _decodeOrThrow(res, defaultMessage: 'Failed to fetch notifications');
+  }
+
+  /// Single notification (`GET /api/v1/notifications/:id`) — includes `navigation` for deep links.
+  Future<Map<String, dynamic>> fetchNotificationById({
+    required String accessToken,
+    required String notificationId,
+  }) async {
+    final id = notificationId.trim();
+    final uri = Uri.parse('$_baseUrl/api/v1/notifications/${Uri.encodeComponent(id)}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load notification');
   }
 
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {

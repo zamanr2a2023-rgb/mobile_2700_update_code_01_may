@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/repositories/app_repository.dart';
+import '../../../routes/app_routes.dart';
 import '../logic/splash_login_check.dart';
 import 'truckfix_loading_screen.dart';
 
@@ -15,6 +18,8 @@ class IntroLoaderScreen extends StatefulWidget {
 }
 
 class _IntroLoaderScreenState extends State<IntroLoaderScreen> {
+  final Completer<void> _gearRoundComplete = Completer<void>();
+
   @override
   void initState() {
     super.initState();
@@ -24,16 +29,25 @@ class _IntroLoaderScreenState extends State<IntroLoaderScreen> {
   Future<void> _route() async {
     if (!mounted) return;
     final auth = context.read<AuthRepository>();
-    final nextFuture = resolvePostSplashLocation(auth);
-    final minFuture = Future<void>.delayed(const Duration(milliseconds: 2200));
-    final next = await nextFuture;
-    await minFuture;
+    String? nextRoute;
+    await Future.wait<void>([
+      resolvePostSplashLocation(auth).then((next) {
+        nextRoute = next;
+      }),
+      _gearRoundComplete.future,
+    ]);
     if (!mounted) return;
-    context.go(next);
+    context.go(nextRoute ?? AppRoutes.splash);
+  }
+
+  void _onGearAnimationComplete() {
+    if (!_gearRoundComplete.isCompleted) {
+      _gearRoundComplete.complete();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return const TruckFixLoadingScreen();
+    return TruckFixLoadingScreen(onAnimationComplete: _onGearAnimationComplete);
   }
 }

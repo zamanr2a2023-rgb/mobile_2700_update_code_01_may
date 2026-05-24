@@ -309,7 +309,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 4),
               Center(
                 child: TextButton(
-                  onPressed: () {},
+                  onPressed: () => widget.onNavigate('forgot'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textMuted,
                     textStyle: const TextStyle(

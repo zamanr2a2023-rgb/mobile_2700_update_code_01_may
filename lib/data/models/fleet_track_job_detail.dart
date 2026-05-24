@@ -10,6 +10,7 @@ class FleetTrackJobDetailUi {
     required this.timeline,
     required this.mechanicName,
     required this.mechanicPhone,
+    this.mechanicProfilePhotoUrl,
     required this.mechanicRating,
     required this.etaMinutes,
     required this.locationAddress,
@@ -44,6 +45,8 @@ class FleetTrackJobDetailUi {
 
   final String mechanicName;
   final String mechanicPhone;
+  /// `assignedMechanic.profilePhotoUrl`
+  final String? mechanicProfilePhotoUrl;
   final double? mechanicRating;
   final int? etaMinutes;
 
@@ -91,6 +94,8 @@ class FleetTrackJobDetailUi {
     final mech = _asMap(root['assignedMechanic']);
     final mechanicName = _str(mech['displayName']);
     final mechanicPhone = _str(mech['phone']);
+    final profilePhotoRaw = _str(mech['profilePhotoUrl']);
+    final mechanicProfilePhotoUrl = profilePhotoRaw.isEmpty ? null : profilePhotoRaw;
     final mechanicRating = mech['rating'] is num ? (mech['rating'] as num).toDouble() : double.tryParse(mech['rating']?.toString() ?? '');
 
     final summary = _asMap(root['summary']);
@@ -144,6 +149,7 @@ class FleetTrackJobDetailUi {
       timeline: timeline,
       mechanicName: mechanicName.isEmpty ? '—' : mechanicName,
       mechanicPhone: mechanicPhone,
+      mechanicProfilePhotoUrl: mechanicProfilePhotoUrl,
       mechanicRating: mechanicRating,
       etaMinutes: etaMinutes,
       locationAddress: address.isEmpty ? '—' : address,

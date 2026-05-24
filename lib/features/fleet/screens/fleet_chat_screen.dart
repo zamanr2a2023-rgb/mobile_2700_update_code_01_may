@@ -40,7 +40,7 @@ class FleetChatScreen extends StatefulWidget {
 
 class _FleetChatScreenState extends State<FleetChatScreen> {
   static const Color _bg = Color(0xFF080808);
-  static const Color _incomingBubble = Color(0xFF1C1C1E);
+  static const Color _incomingBubble = Color(0xFF1A1A1A);
   static const Color _barBg = Color(0xFF0F0F0F);
   static const Color _inputBg = Color(0xFF1A1A1A);
   static const Color _inputBorder = Color(0xFF2A2A2A);
@@ -217,7 +217,7 @@ class _FleetChatScreenState extends State<FleetChatScreen> {
                                   ),
                                   Text(
                                     'Online now',
-                                    style: TextStyle(color: AppColors.textHint.withValues(alpha: 0.85), fontSize: 10, fontWeight: FontWeight.w500),
+                                    style: TextStyle(color: const Color(0xFF6B7280), fontSize: 10, fontWeight: FontWeight.w500),
                                   ),
                                 ],
                               ),
@@ -255,7 +255,7 @@ class _FleetChatScreenState extends State<FleetChatScreen> {
                         '${s.jobCode} · ${s.truckLine}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.95), fontSize: 11, fontWeight: FontWeight.w600),
+                        style: TextStyle(color: const Color(0xFF6B7280), fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ],
@@ -276,60 +276,68 @@ class _FleetChatScreenState extends State<FleetChatScreen> {
                         children: [
                           ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: outgoing ? AppColors.primary : _incomingBubble,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    if (m.imageUrl != null)
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: CachedNetworkImage(
-                                          imageUrl: m.imageUrl!,
-                                          height: 200,
-                                          width: double.infinity,
-                                          fit: BoxFit.cover,
-                                        ),
-                                      )
-                                    else if (m.imageFilePath != null)
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: Image.file(
-                                          File(m.imageFilePath!),
-                                          fit: BoxFit.cover,
-                                          height: 200,
-                                          width: double.infinity,
-                                        ),
-                                      ),
-                                    if (m.text.isNotEmpty) ...[
-                                      if (m.imageUrl != null || m.imageFilePath != null) const SizedBox(height: 8),
-                                      Text(
-                                        m.text,
-                                        style: TextStyle(
-                                          color: outgoing ? Colors.black : Colors.white,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          height: 1.35,
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      m.time,
-                                      style: TextStyle(
-                                        color: outgoing ? Colors.black.withValues(alpha: 0.55) : AppColors.textHint.withValues(alpha: 0.9),
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                            child: Column(
+                              crossAxisAlignment: outgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              children: [
+                                DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: outgoing ? AppColors.primary : _incomingBubble,
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (m.imageUrl != null)
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(14),
+                                            child: CachedNetworkImage(
+                                              imageUrl: m.imageUrl!,
+                                              height: 200,
+                                              width: double.infinity,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          )
+                                        else if (m.imageFilePath != null)
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(14),
+                                            child: Image.file(
+                                              File(m.imageFilePath!),
+                                              fit: BoxFit.cover,
+                                              height: 200,
+                                              width: double.infinity,
+                                            ),
+                                          ),
+                                        if (m.text.isNotEmpty) ...[
+                                          if (m.imageUrl != null || m.imageFilePath != null) const SizedBox(height: 8),
+                                          Text(
+                                            m.text,
+                                            style: TextStyle(
+                                              color: outgoing ? Colors.black : Colors.white,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                  ],
+                                  ),
                                 ),
-                              ),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4, left: 2, right: 2),
+                                  child: Text(
+                                    m.time,
+                                    style: TextStyle(
+                                      color:
+                                          outgoing ? const Color(0xFF374151).withValues(alpha: 0.85) : const Color(0xFF6B7280).withValues(alpha: 0.95),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -366,21 +374,21 @@ class _FleetChatScreenState extends State<FleetChatScreen> {
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _sendText(),
                         decoration: InputDecoration(
-                          hintText: 'Type a message…',
+                          hintText: 'Type a message...',
                           hintStyle: TextStyle(color: AppColors.textHint.withValues(alpha: 0.65), fontSize: 14),
                           filled: true,
                           fillColor: _inputBg,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
+                            borderRadius: BorderRadius.circular(14),
                             borderSide: const BorderSide(color: _inputBorder),
                           ),
                           enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
+                            borderRadius: BorderRadius.circular(14),
                             borderSide: const BorderSide(color: _inputBorder),
                           ),
                           focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
+                            borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide(color: AppColors.primary.withValues(alpha: 0.55)),
                           ),
                         ),
@@ -393,14 +401,15 @@ class _FleetChatScreenState extends State<FleetChatScreen> {
                         final canSend = v.text.trim().isNotEmpty;
                         return Material(
                           color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(12),
+                          shape: const CircleBorder(),
+                          clipBehavior: Clip.antiAlias,
                           child: InkWell(
                             onTap: canSend ? _sendText : null,
-                            borderRadius: BorderRadius.circular(12),
+                            customBorder: const CircleBorder(),
                             child: SizedBox(
                               width: 44,
                               height: 44,
-                              child: Icon(Icons.send_rounded, size: 20, color: canSend ? Colors.black : Colors.black.withValues(alpha: 0.35)),
+                              child: Icon(Icons.chevron_right_rounded, size: 26, color: canSend ? Colors.black : Colors.black.withValues(alpha: 0.35)),
                             ),
                           ),
                         );

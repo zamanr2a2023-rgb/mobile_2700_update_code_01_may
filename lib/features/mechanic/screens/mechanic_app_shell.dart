@@ -1,21 +1,34 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../data/models/fleet_billing_payment_method.dart';
 import '../../../data/models/job_offer.dart';
+import '../../../data/models/mechanic_job_detail.dart';
+import '../../../data/models/mechanic_me_profile.dart';
 import '../../../data/repositories/app_repository.dart';
 import '../../../routes/app_routes.dart';
+import '../../../widgets/job_location_google_map_preview.dart';
 import '../../../widgets/truckfix_map_preview.dart';
+import '../../../widgets/api_job_chat_screen.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
 import '../../categories/job_taxonomy.dart';
 import '../viewmodel/mechanic_viewmodel.dart';
+import 'mechanic_messages_chat_screens.dart';
 import '../../../data/services/mechanic_api_service.dart';
+import '../../../data/services/support_api_service.dart';
 
 class MechanicAppShell extends StatelessWidget {
   const MechanicAppShell({super.key});
@@ -61,11 +74,26 @@ class _MechBody extends StatelessWidget {
       case 'my-quotes':
         return _MyQuotes(onBack: () => vm.setTab('feed'));
       case 'quote-detail':
-        return _QuoteDetailPage(onBack: () => vm.setTab('feed'));
+        return _QuoteDetailPage(
+          onBack: () {
+            vm.clearJobQuoteDetail();
+            vm.setTab('feed');
+          },
+        );
       case 'my-jobs':
-        return _MyJobsPage(onTracker: () => vm.setTab('job-tracker'));
+        return _MyJobsPage(
+          onOpenTracker: (jobId) {
+            vm.selectJobForTracker(jobId);
+            vm.setTab('job-tracker');
+          },
+        );
       case 'job-tracker':
-        return _JobTrackerPage(onBack: () => vm.setTab('my-jobs'));
+        return MechanicJobTrackerPage(
+          onBack: () {
+            vm.clearJobTrackerSelection();
+            vm.setTab('my-jobs');
+          },
+        );
       case 'earnings':
         return _MechanicEarnings(onBack: () => vm.setTab('profile'));
       case 'edit-profile':
@@ -82,6 +110,44 @@ class _MechBody extends StatelessWidget {
             await context.read<AuthViewModel>().logout();
             if (context.mounted) context.go(AppRoutes.login);
           },
+        );
+      case 'profile-messages':
+        return MechanicMessagesListPage(onBack: () => vm.setTab('profile'));
+      case 'profile-messages-chat':
+        final peer = vm.activeChatPeer;
+        if (peer == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) vm.setTab('profile-messages');
+          });
+          return const ColoredBox(color: AppColors.bg, child: SizedBox.expand());
+        }
+        final token = context.watch<AuthViewModel>().session?.accessToken;
+        if (token == null || token.trim().isEmpty) {
+          return ColoredBox(
+            color: AppColors.bg,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Session expired. Sign in again.', style: TextStyle(color: AppColors.textMuted)),
+                    TextButton(onPressed: () => vm.closeMessageChat(), child: const Text('Back')),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        return ApiJobChatScreen(
+          accessToken: token,
+          jobId: peer.jobId,
+          headerTitle: peer.title,
+          headerSubtitle: peer.subtitle,
+          headerAvatarUrl: peer.photoUrl,
+          peerPhone: peer.phone,
+          onClose: () => vm.closeMessageChat(),
+          avatarFallbackAsset: AppAssets.mechanicPortrait,
         );
       default:
         return const _JobFeedPage();
@@ -128,11 +194,56 @@ class _HelpSupportSheetState extends State<_HelpSupportSheet> {
   String? _categoryId;
   final _messageCtrl = TextEditingController();
   bool _sent = false;
+  bool _submitting = false;
 
-  static const _fromEmail = 'james@truckfix.co.uk';
-  static const _roleLabel = 'Mechanic';
+  final _supportApi = SupportApiService();
 
   bool get _canSend => _categoryId != null && _messageCtrl.text.trim().isNotEmpty;
+
+  String _senderLine(String? email) {
+    final e = email == null || email.trim().isEmpty ? 'your registered email' : email.trim();
+    return 'Sent from: $e · Mechanic';
+  }
+
+  String _subjectForCategory(String id) {
+    for (final c in _categories) {
+      if (c.id == id) return c.label;
+    }
+    return id;
+  }
+
+  Future<void> _submit() async {
+    if (!_canSend || _submitting || _categoryId == null) return;
+    final token = context.read<AuthViewModel>().session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please sign in again to send support messages.')));
+      return;
+    }
+    final subjectLabel = _subjectForCategory(_categoryId!);
+    setState(() => _submitting = true);
+    try {
+      await _supportApi.createTicket(
+        accessToken: token,
+        subject: subjectLabel,
+        message: _messageCtrl.text.trim(),
+        category: supportTicketCategoryEnum(_categoryId!),
+      );
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _sent = true;
+      });
+    } on SupportApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not send message. Please try again.')));
+    }
+  }
 
   @override
   void dispose() {
@@ -142,6 +253,7 @@ class _HelpSupportSheetState extends State<_HelpSupportSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final sessionEmail = context.watch<AuthViewModel>().session?.email;
     final maxH = MediaQuery.sizeOf(context).height * 0.88;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
@@ -369,7 +481,7 @@ class _HelpSupportSheetState extends State<_HelpSupportSheet> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Sent from: $_fromEmail · $_roleLabel',
+                          _senderLine(sessionEmail),
                           style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.85), fontSize: 10),
                         ),
                       ],
@@ -387,15 +499,24 @@ class _HelpSupportSheetState extends State<_HelpSupportSheet> {
                         width: double.infinity,
                         height: 48,
                         child: ElevatedButton.icon(
-                          onPressed: _canSend ? () => setState(() => _sent = true) : null,
-                          icon: Icon(Icons.send_rounded, size: 18, color: _canSend ? Colors.black : Colors.black.withValues(alpha: 0.35)),
+                          onPressed: (_canSend && !_submitting) ? _submit : null,
+                          icon: _submitting
+                              ? SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.black.withValues(alpha: 0.7),
+                                  ),
+                                )
+                              : Icon(Icons.send_rounded, size: 18, color: (_canSend && !_submitting) ? Colors.black : Colors.black.withValues(alpha: 0.35)),
                           label: Text(
                             'SEND MESSAGE',
                             style: TextStyle(
                               fontWeight: FontWeight.w900,
                               letterSpacing: 2,
                               fontSize: 12,
-                              color: _canSend ? Colors.black : Colors.black.withValues(alpha: 0.35),
+                              color: (_canSend && !_submitting) ? Colors.black : Colors.black.withValues(alpha: 0.35),
                             ),
                           ),
                           style: ElevatedButton.styleFrom(
@@ -481,25 +602,55 @@ class _MechBottomNav extends StatelessWidget {
   }
 }
 
-class _JobFeedPage extends StatelessWidget {
+class _JobFeedPage extends StatefulWidget {
   const _JobFeedPage();
 
+  @override
+  State<_JobFeedPage> createState() => _JobFeedPageState();
+}
+
+class _JobFeedPageState extends State<_JobFeedPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MechanicViewModel>().loadJobFeed();
+    });
+  }
+
   Future<void> _toggleOnline(BuildContext context) async {
+    final vm = context.read<MechanicViewModel>();
     try {
-      await context.read<MechanicViewModel>().toggleOnline();
+      await vm.toggleOnline();
+      if (mounted) await vm.loadJobFeed();
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
+  List<JobOffer> _filtered(MechanicViewModel vm) {
+    if (vm.maxDistMi == null) return vm.feedJobs;
+    return vm.feedJobs
+        .where((j) => j.distanceMi <= vm.maxDistMi!)
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<MechanicViewModel>();
-    final jobs = vm.online ? vm.filteredJobs() : <JobOffer>[];
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      children: [
+    final jobs = vm.online ? _filtered(vm) : <JobOffer>[];
+
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: () async {
+        await vm.loadJobFeed();
+      },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        children: [
         Row(
           children: [
             const Expanded(
@@ -576,40 +727,6 @@ class _JobFeedPage extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            OutlinedButton(
-              onPressed: () => _MechanicFeedSheets.serviceArea(context),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: AppColors.primary.withValues(alpha: 0.35)),
-                foregroundColor: AppColors.primary,
-                backgroundColor: AppColors.card,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-              ),
-              child: Text('${vm.radiusMi} mi radius', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11)),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => _MechanicFeedSheets.serviceArea(context),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: AppColors.card,
-                  side: const BorderSide(color: AppColors.border2),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-                ),
-                child: Text(
-                  '${vm.city}, ${vm.postcode}',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.textSecondary),
-                ),
-              ),
-            ),
-          ],
-        ),
         if (vm.online) ...[
           const SizedBox(height: 10),
           SingleChildScrollView(
@@ -644,9 +761,45 @@ class _JobFeedPage extends StatelessWidget {
               ),
             ),
           )
+        else if (vm.feedLoading)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 40),
+            child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+          )
+        else if (vm.feedError != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Column(
+              children: [
+                const Icon(Icons.error_outline, color: AppColors.textMuted, size: 36),
+                const SizedBox(height: 10),
+                Text(vm.feedError!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: vm.loadJobFeed,
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.primary), foregroundColor: AppColors.primary),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          )
+        else if (jobs.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(40),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.search_off, size: 48, color: AppColors.textHint),
+                  SizedBox(height: 12),
+                  Text('No jobs nearby', style: TextStyle(color: AppColors.textMuted, fontSize: 14)),
+                ],
+              ),
+            ),
+          )
         else
           ...jobs.map((j) => _jobCard(context, j)),
       ],
+    ),
     );
   }
 
@@ -680,7 +833,15 @@ class _JobFeedPage extends StatelessWidget {
             border: Border.all(color: AppColors.border),
           ),
           child: InkWell(
-            onTap: () => context.read<MechanicViewModel>().setTab('quote-detail'),
+            onTap: () {
+              if (j.backendId == null || j.backendId!.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('This job cannot be opened (missing server id).')),
+                );
+                return;
+              }
+              vm.openJobQuoteDetail(j);
+            },
             borderRadius: BorderRadius.circular(14),
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -796,7 +957,9 @@ class _JobFeedPage extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _MechanicFeedSheets {
+  // ignore: unused_element
   static String _radiusLabelFor(int miles) {
     if (miles <= 5) return 'Local';
     if (miles <= 15) return 'Town / City';
@@ -805,6 +968,7 @@ class _MechanicFeedSheets {
     return 'Nationwide';
   }
 
+  // ignore: unused_element
   static Future<void> serviceArea(BuildContext context) async {
     final vm = context.read<MechanicViewModel>();
     var draftRadius = vm.radiusMi;
@@ -1292,26 +1456,6 @@ class _MyQuotesState extends State<_MyQuotes> {
                                 ),
                               ),
                             ],
-                            // Resubmit action for expired / declined quotes
-                            if (q.canResubmit) ...[
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton(
-                                  onPressed: () {/* TODO: resubmit flow */},
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(color: AppColors.primary.withValues(alpha: 0.50)),
-                                    foregroundColor: AppColors.primary,
-                                    padding: const EdgeInsets.symmetric(vertical: 9),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  child: const Text(
-                                    'Resubmit Quote',
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -1358,6 +1502,8 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
   String _availability = 'Available Now';
   String? _scheduledDate;
   String? _scheduledTime;
+  String? _prefilledQuoteJobId;
+  String? _submittedFleetName;
 
   static const _timeSlots = [
     '08:00',
@@ -1390,6 +1536,35 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
   }
 
   List<_QuoteScheduleDay> get _days => _buildDays();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MechanicViewModel>().loadJobQuoteDetail();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final vm = context.read<MechanicViewModel>();
+    final d = vm.jobQuoteDetail;
+    if (d != null && _prefilledQuoteJobId != d.id) {
+      _prefilledQuoteJobId = d.id;
+      if (_quoteCtrl.text.trim().isEmpty) {
+        final est = d.estimatedPayout;
+        if (est != null && est > 0) {
+          final t = est == est.roundToDouble() ? est.round().toString() : est.toStringAsFixed(0);
+          _quoteCtrl.value = TextEditingValue(
+            text: t,
+            selection: TextSelection.collapsed(offset: t.length),
+          );
+        }
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -1434,7 +1609,14 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(MechanicJobDetailParsed d) {
+    final urg = switch (d.urgencyUpper) {
+      'CRITICAL' => JobUrgency.critical,
+      'HIGH' => JobUrgency.high,
+      'MEDIUM' => JobUrgency.medium,
+      _ => JobUrgency.low,
+    };
+    final sub = d.postedAgoText.isEmpty ? d.jobCode : '${d.jobCode} · ${d.postedAgoText}';
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       decoration: const BoxDecoration(
@@ -1462,11 +1644,11 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   'Job Detail',
                   style: TextStyle(
                     color: Colors.white,
@@ -1475,10 +1657,10 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                     letterSpacing: -0.3,
                   ),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
-                  'TF-8821 · 4 min ago',
-                  style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 11),
+                  sub,
+                  style: const TextStyle(color: Color(0xFF6B6B6B), fontSize: 11),
                 ),
               ],
             ),
@@ -1486,14 +1668,14 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: AppColors.orange.withValues(alpha: 0.10),
+              color: urg.chipBg,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.orange.withValues(alpha: 0.30)),
+              border: Border.all(color: urg.chipBorder),
             ),
-            child: const Text(
-              'HIGH',
+            child: Text(
+              urgencyLabel(urg),
               style: TextStyle(
-                color: AppColors.orange,
+                color: urg.foreground,
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
               ),
@@ -1563,9 +1745,8 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                       text: '£$amt',
                       style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
                     ),
-                    const TextSpan(
-                      text:
-                          ' has been sent to Logistix Transport. You\'ll be notified when they respond.',
+                    TextSpan(
+                      text: ' has been sent to ${_submittedFleetName ?? 'the fleet'}. You\'ll be notified when they respond.',
                     ),
                   ],
                 ),
@@ -1646,7 +1827,9 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
     );
   }
 
-  Widget _buildFooter() {
+  Widget _buildFooter(MechanicViewModel vm, MechanicJobDetailParsed d) {
+    final can = d.canSubmitNewQuote;
+    final busy = vm.quoteSubmitBusy;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
       decoration: const BoxDecoration(
@@ -1658,29 +1841,63 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => setState(() => _submitted = true),
+              onPressed: !can || busy
+                  ? null
+                  : () async {
+                      final parsed = double.tryParse(_quoteCtrl.text.replaceAll(',', '').trim());
+                      if (parsed == null || parsed <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Enter a valid quote amount')),
+                        );
+                        return;
+                      }
+                      FocusScope.of(context).unfocus();
+                      final err = await vm.submitJobQuote(
+                        amount: parsed,
+                        notes: _notesCtrl.text.trim(),
+                        availabilityUi: _availability,
+                        scheduledDateKey: _scheduledDate,
+                        scheduledTime: _scheduledTime,
+                      );
+                      if (!mounted) return;
+                      if (err != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                        return;
+                      }
+                      setState(() {
+                        _submittedFleetName = d.fleetName.isNotEmpty ? d.fleetName : null;
+                        _submitted = true;
+                      });
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.black,
+                disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.35),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 elevation: 0,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.send_rounded, size: 18, color: Colors.black),
-                  SizedBox(width: 8),
-                  Text(
-                    'SUBMIT QUOTE',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.4),
-                  ),
-                ],
-              ),
+              child: busy
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                    )
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.send_rounded, size: 18, color: Colors.black),
+                        SizedBox(width: 8),
+                        Text(
+                          'SUBMIT QUOTE',
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.4),
+                        ),
+                      ],
+                    ),
             ),
           ),
           TextButton(
-            onPressed: widget.onBack,
+            onPressed: busy ? null : widget.onBack,
             child: Text(
               'Not interested — Skip',
               style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.9), fontSize: 12),
@@ -1691,19 +1908,105 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
     );
   }
 
+  Widget _buildHeaderLoading() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        children: [
+          Material(
+            color: AppColors.card2,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              onTap: widget.onBack,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border2),
+                ),
+                child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: AppColors.textSecondary),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Job Detail',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<MechanicViewModel>();
     if (_submitted) {
       return _buildSubmitted(context);
+    }
+    if (vm.jobQuoteDetailLoading && vm.jobQuoteDetail == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildHeaderLoading(),
+          const Expanded(child: Center(child: CircularProgressIndicator(color: AppColors.primary))),
+        ],
+      );
+    }
+    if (vm.jobQuoteDetailError != null && vm.jobQuoteDetail == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildHeaderLoading(),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(vm.jobQuoteDetailError!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                  const SizedBox(height: 16),
+                  OutlinedButton(onPressed: () => vm.loadJobQuoteDetail(), child: const Text('Retry')),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    final d = vm.jobQuoteDetail;
+    if (d == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildHeaderLoading(),
+          const Expanded(
+            child: Center(
+              child: Text('No job loaded.', style: TextStyle(color: AppColors.textMuted)),
+            ),
+          ),
+        ],
+      );
     }
 
     final scheduledOn = _availability == 'Scheduled';
     final days = _days;
+    final hasRoute = d.mechanicLngLat != null && d.jobDestinationLngLat != null;
+    final mapBreakdown = d.mapBreakdownLngLat;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildHeader(),
+        _buildHeader(d),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -1725,15 +2028,15 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(child: _kv('Vehicle', 'Tautliner Semi')),
-                          Expanded(child: _kv('Reg', 'CA 456-789')),
+                          Expanded(child: _kv('Vehicle', d.vehicleMakeModel)),
+                          Expanded(child: _kv('Reg', d.vehicleRegistration.isEmpty ? '—' : d.vehicleRegistration)),
                         ],
                       ),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(child: _kv('Fleet', 'Logistix Transport')),
-                          Expanded(child: _kv('Issue Type', 'Engine / Mechanical')),
+                          Expanded(child: _kv('Fleet', d.fleetName.isEmpty ? '—' : d.fleetName)),
+                          Expanded(child: _kv('Issue Type', d.issueTypeLabel)),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -1745,10 +2048,9 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Engine overheating — coolant leak suspected. Temperature gauge in the red. '
-                        'Driver has pulled over safely on the N1 highway near Midrand.',
-                        style: TextStyle(color: Colors.white, fontSize: 12, height: 1.45),
+                      Text(
+                        d.description.isEmpty ? '—' : d.description,
+                        style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.45),
                       ),
                     ],
                   ),
@@ -1764,57 +2066,42 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _sectionTitle('PHOTOS (2)'),
+                      _sectionTitle('PHOTOS (${d.photoUrls.length})'),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: AspectRatio(
-                              aspectRatio: 16 / 9,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: CachedNetworkImage(
-                                  imageUrl: AppAssets.truckWorkshop,
-                                  fit: BoxFit.cover,
-                                  placeholder: (_, __) => Container(color: AppColors.card2),
-                                  errorWidget: (_, __, ___) => Container(
-                                    color: AppColors.card2,
-                                    alignment: Alignment.center,
-                                    child: const Icon(Icons.local_shipping_outlined, color: AppColors.textMuted),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: AspectRatio(
-                              aspectRatio: 16 / 9,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: AppColors.card2,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: AppColors.border2),
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.camera_alt_outlined, size: 26, color: AppColors.textHint),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Engine bay',
-                                      style: TextStyle(
-                                        color: AppColors.textHint.withValues(alpha: 0.85),
-                                        fontSize: 10,
+                      if (d.photoUrls.isEmpty)
+                        Text(
+                          'No photos uploaded for this job.',
+                          style: TextStyle(color: AppColors.textHint.withValues(alpha: 0.9), fontSize: 12),
+                        )
+                      else
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              for (final url in d.photoUrls)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: SizedBox(
+                                      width: 160,
+                                      height: 90,
+                                      child: CachedNetworkImage(
+                                        imageUrl: url,
+                                        fit: BoxFit.cover,
+                                        placeholder: (_, __) => Container(color: AppColors.card2),
+                                        errorWidget: (_, __, ___) => Container(
+                                          color: AppColors.card2,
+                                          alignment: Alignment.center,
+                                          child: const Icon(Icons.broken_image_outlined, color: AppColors.textMuted),
+                                        ),
                                       ),
                                     ),
-                                  ],
+                                  ),
                                 ),
-                              ),
-                            ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
                     ],
                   ),
                 ),
@@ -1831,7 +2118,16 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                     children: [
                       _sectionTitle('LOCATION'),
                       const SizedBox(height: 12),
-                      const TruckFixMapPreview(height: 130, showRoute: true),
+                      if (!kIsWeb && mapBreakdown != null)
+                        JobLocationGoogleMapPreview(
+                          height: 130,
+                          lat: mapBreakdown.lat,
+                          lng: mapBreakdown.lng,
+                          mechanicLat: hasRoute ? d.mechanicLngLat?.lat : null,
+                          mechanicLng: hasRoute ? d.mechanicLngLat?.lng : null,
+                        )
+                      else
+                        TruckFixMapPreview(height: 130, showRoute: hasRoute, liveLabel: true),
                       const SizedBox(height: 12),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1841,33 +2137,63 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                             child: Icon(Icons.location_on_rounded, size: 16, color: AppColors.red),
                           ),
                           const SizedBox(width: 8),
-                          const Expanded(
+                          Expanded(
                             child: Text(
-                              'N1 Highway, km 184, Midrand',
-                              style: TextStyle(color: Colors.white, fontSize: 12),
+                              d.locationDisplayAddress,
+                              style: const TextStyle(color: Colors.white, fontSize: 12),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Icon(Icons.navigation_rounded, size: 16, color: AppColors.primary),
-                          const SizedBox(width: 8),
-                          const Text(
-                            '3.2 km from your location',
-                            style: TextStyle(
-                              color: AppColors.primary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                      if (d.distanceFromYouLine != null) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(Icons.navigation_rounded, size: 16, color: AppColors.primary),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                d.distanceFromYouLine!,
+                                style: const TextStyle(
+                                  color: AppColors.primary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
+                if (!d.canSubmitNewQuote) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.orange.withValues(alpha: 0.35)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline_rounded, color: AppColors.orange, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            d.hasAcceptedQuote
+                                ? 'You already have an accepted quote on this job. Open My Jobs to continue the visit.'
+                                : 'This job is not accepting new quotes right now (${d.statusUpper.replaceAll('_', ' ')}). You can still review the details below.',
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 11, height: 1.35),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -1881,7 +2207,7 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                       _sectionTitle('SUBMIT YOUR QUOTE'),
                       const SizedBox(height: 14),
                       Text(
-                        'QUOTE AMOUNT (GBP)',
+                        'QUOTE AMOUNT (${d.currencyCode})',
                         style: TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 11,
@@ -1901,7 +2227,7 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                         decoration: InputDecoration(
                           filled: true,
                           fillColor: AppColors.card2,
-                          prefixText: '£ ',
+                          prefixText: '${d.currencySymbol} ',
                           prefixStyle: const TextStyle(
                             color: AppColors.textSecondary,
                             fontSize: 14,
@@ -1921,15 +2247,25 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                           ),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                         ),
+                        readOnly: !d.canSubmitNewQuote,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        'Suggested range: £130 – £200',
-                        style: TextStyle(
-                          color: AppColors.textHint.withValues(alpha: 0.85),
-                          fontSize: 10,
+                      if (d.suggestedQuoteRangeLabel != null)
+                        Text(
+                          d.suggestedQuoteRangeLabel!,
+                          style: TextStyle(
+                            color: AppColors.textHint.withValues(alpha: 0.85),
+                            fontSize: 10,
+                          ),
+                        )
+                      else
+                        Text(
+                          'Enter your quote amount for this job.',
+                          style: TextStyle(
+                            color: AppColors.textHint.withValues(alpha: 0.85),
+                            fontSize: 10,
+                          ),
                         ),
-                      ),
                       const SizedBox(height: 14),
                       Text(
                         'NOTES FOR FLEET OPERATOR',
@@ -1964,6 +2300,7 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
                           ),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         ),
+                        readOnly: !d.canSubmitNewQuote,
                       ),
                       const SizedBox(height: 14),
                       Text(
@@ -2200,16 +2537,16 @@ class _QuoteDetailPageState extends State<_QuoteDetailPage> {
             ),
           ),
         ),
-        _buildFooter(),
+        _buildFooter(vm, d),
       ],
     );
   }
 }
 
 class _MyJobsPage extends StatefulWidget {
-  const _MyJobsPage({required this.onTracker});
+  const _MyJobsPage({required this.onOpenTracker});
 
-  final VoidCallback onTracker;
+  final void Function(String jobId) onOpenTracker;
 
   @override
   State<_MyJobsPage> createState() => _MyJobsPageState();
@@ -2364,7 +2701,7 @@ class _MyJobsPageState extends State<_MyJobsPage> {
                     color: AppColors.card,
                     borderRadius: BorderRadius.circular(14),
                     child: InkWell(
-                      onTap: widget.onTracker,
+                      onTap: () => widget.onOpenTracker(job.backendId),
                       borderRadius: BorderRadius.circular(14),
                       child: Ink(
                         decoration: BoxDecoration(
@@ -2585,28 +2922,31 @@ class _TrackerStep {
   final Color color;
 }
 
-class _JobTrackerPage extends StatefulWidget {
-  const _JobTrackerPage({required this.onBack});
+/// Full mechanic job tracker (feed of [MechanicViewModel]) — also used by [EmployeeAppShell].
+class MechanicJobTrackerPage extends StatefulWidget {
+  const MechanicJobTrackerPage({super.key, required this.onBack});
 
   final VoidCallback onBack;
 
   @override
-  State<_JobTrackerPage> createState() => _JobTrackerPageState();
+  State<MechanicJobTrackerPage> createState() => _MechanicJobTrackerPageState();
 }
 
-class _JobTrackerPageState extends State<_JobTrackerPage> {
-  int _step = 0;
-  final _callOutCtrl = TextEditingController(text: '85');
-  final _labourHoursCtrl = TextEditingController(text: '1.5');
+class _MechanicJobTrackerPageState extends State<MechanicJobTrackerPage> {
+  final _callOutCtrl = TextEditingController();
+  final _labourHoursCtrl = TextEditingController();
+  final _labourRateCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   final _reviewCtrl = TextEditingController();
 
   final List<({TextEditingController name, TextEditingController cost})> _parts = [];
-  final List<String> _photos = [];
+  final List<XFile> _photoFiles = [];
 
   bool _showReview = false;
   int _rating = 0;
   bool _reviewSubmitted = false;
+  bool _reviewSubmitBusy = false;
+  String? _seededInvoiceJobId;
 
   static const _labels = <String>[
     'Start Journey',
@@ -2624,18 +2964,47 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     _TrackerStep(id: 4, shortLabel: 'Done', icon: Icons.check_circle_rounded, color: AppColors.green),
   ];
 
-  Color get _stepDot => switch (_step) {
-        0 => const Color(0xFF60A5FA),
-        1 => AppColors.primary,
-        2 => AppColors.orange,
-        3 => AppColors.orange,
-        _ => AppColors.green,
-      };
+  @override
+  void initState() {
+    super.initState();
+    _callOutCtrl.text = '85';
+    _labourHoursCtrl.text = '1.5';
+    _labourRateCtrl.text = '65';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MechanicViewModel>().loadJobTrackerDetail();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final d = context.read<MechanicViewModel>().jobTrackerDetail;
+    if (d != null && _seededInvoiceJobId != d.id) {
+      _seededInvoiceJobId = d.id;
+      final r = d.labourRatePerHour;
+      if (r > 0) {
+        _labourRateCtrl.text = r == r.roundToDouble() ? r.round().toString() : r.toStringAsFixed(2);
+      }
+    }
+  }
+
+  int _displayStep(MechanicViewModel vm) {
+    final d = vm.jobTrackerDetail;
+    if (d != null && d.showCompletedSummary) return 4;
+    return d?.uiStepIndex ?? 0;
+  }
+
+  Color _stepAccent(MechanicViewModel vm) {
+    final i = _displayStep(vm).clamp(0, _steps.length - 1);
+    return _steps[i].color;
+  }
 
   @override
   void dispose() {
     _callOutCtrl.dispose();
     _labourHoursCtrl.dispose();
+    _labourRateCtrl.dispose();
     _notesCtrl.dispose();
     _reviewCtrl.dispose();
     for (final p in _parts) {
@@ -2647,15 +3016,22 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
 
   double get _callOut => double.tryParse(_callOutCtrl.text.trim()) ?? 0;
   double get _labourHours => double.tryParse(_labourHoursCtrl.text.trim()) ?? 0;
-  static const double _labourRate = 65;
-  double get _labourTotal => _labourHours * _labourRate;
+  double _labourRate(MechanicViewModel vm) {
+    final parsed = double.tryParse(_labourRateCtrl.text.trim());
+    if (parsed != null && parsed > 0) return parsed;
+    return vm.jobTrackerDetail?.labourRatePerHour ?? 65;
+  }
+  double _labourTotal(MechanicViewModel vm) => _labourHours * _labourRate(vm);
   double get _partsTotal =>
       _parts.fold<double>(0, (s, p) => s + (double.tryParse(p.cost.text.trim()) ?? 0));
-  double get _totalInvoice => _callOut + _labourTotal + _partsTotal;
+  double _totalInvoice(MechanicViewModel vm) => _callOut + _labourTotal(vm) + _partsTotal;
 
-  Widget _header() {
-    final accent = _steps[_step].color;
-    final pulse = _step == 3;
+  Widget _header(MechanicViewModel vm) {
+    final st = _displayStep(vm);
+    final accent = _stepAccent(vm);
+    final detail = vm.jobTrackerDetail;
+    final pulse = st == 3 && !(detail?.showCompletedSummary ?? false);
+    final timeStr = TimeOfDay.now().format(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
       decoration: const BoxDecoration(
@@ -2689,10 +3065,10 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
               children: [
                 Row(
                   children: [
-                    _StatusDot(color: _stepDot, pulse: pulse),
+                    _StatusDot(color: accent, pulse: pulse),
                     const SizedBox(width: 6),
                     Text(
-                      _labels[_step].toUpperCase(),
+                      _labels[st].toUpperCase(),
                       style: TextStyle(
                         color: accent,
                         fontSize: 10,
@@ -2703,9 +3079,9 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                   ],
                 ),
                 const SizedBox(height: 2),
-                const Text(
-                  'TF-8797 · Atlas Haulage Ltd',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900, height: 1.05),
+                Text(
+                  detail?.headerSubtitle ?? '—',
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w900, height: 1.05),
                 ),
               ],
             ),
@@ -2722,7 +3098,7 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                 Icon(Icons.timer_rounded, size: 16, color: accent),
                 const SizedBox(width: 6),
                 Text(
-                  '14:22',
+                  timeStr,
                   style: TextStyle(color: accent, fontSize: 12, fontWeight: FontWeight.w900),
                 ),
               ],
@@ -2733,7 +3109,51 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _timeline() {
+  IconData _iconForWorkflowKey(String key) {
+    switch (key.toUpperCase()) {
+      case 'ASSIGNED':
+        return Icons.navigation_rounded;
+      case 'EN_ROUTE':
+        return Icons.location_on_rounded;
+      case 'ON_SITE':
+        return Icons.build_rounded;
+      case 'IN_PROGRESS':
+        return Icons.timer_rounded;
+      case 'COMPLETED':
+        return Icons.check_circle_rounded;
+      default:
+        return Icons.flag_rounded;
+    }
+  }
+
+  Widget _timeline(MechanicViewModel vm) {
+    final detail = vm.jobTrackerDetail;
+    final apiSteps = detail?.workflowSteps ?? const <MechanicWorkflowStepUi>[];
+    final cur = _displayStep(vm);
+    if (apiSteps.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: const BoxDecoration(
+          color: AppColors.bg,
+          border: Border(bottom: BorderSide(color: AppColors.border)),
+        ),
+        child: Row(
+          children: [
+            for (int i = 0; i < _steps.length; i++) ...[
+              _TimelineNode(step: _steps[i], currentStep: cur),
+              if (i != _steps.length - 1)
+                Expanded(
+                  child: Container(
+                    height: 1,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    color: i < cur ? AppColors.primary : AppColors.border2,
+                  ),
+                ),
+            ],
+          ],
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       decoration: const BoxDecoration(
@@ -2742,17 +3162,14 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
       ),
       child: Row(
         children: [
-          for (int i = 0; i < _steps.length; i++) ...[
-            _TimelineNode(
-              step: _steps[i],
-              currentStep: _step,
-            ),
-            if (i != _steps.length - 1)
+          for (int i = 0; i < apiSteps.length; i++) ...[
+            _TimelineNodeApi(step: apiSteps[i], icon: _iconForWorkflowKey(apiSteps[i].key)),
+            if (i != apiSteps.length - 1)
               Expanded(
                 child: Container(
                   height: 1,
                   margin: const EdgeInsets.only(bottom: 14),
-                  color: i < _step ? AppColors.primary : AppColors.border2,
+                  color: apiSteps[i].done ? AppColors.primary : AppColors.border2,
                 ),
               ),
           ],
@@ -2761,7 +3178,12 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _jobCard({required bool orangeAccent}) {
+  Widget _jobCard(MechanicViewModel vm, {required bool orangeAccent}) {
+    final d = vm.jobTrackerDetail;
+    final truck = d?.vehicleLine ?? '—';
+    final fleet = d?.fleetName ?? '—';
+    final phone = d?.fleetPhone ?? '';
+    final issue = d?.title ?? '—';
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -2788,25 +3210,25 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Flatbed · WC 678-123',
-                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900),
+                  truck,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
-                  'Atlas Haulage Ltd · +44 161 400 9988',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                  phone.isNotEmpty ? '$fleet · $phone' : fleet,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                 ),
-                SizedBox(height: 6),
+                const SizedBox(height: 6),
                 Text(
-                  'Right rear dual tyre blowout, roadside...',
-                  maxLines: 1,
+                  issue,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                 ),
               ],
             ),
@@ -2816,10 +3238,16 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
             color: AppColors.primary,
             borderRadius: BorderRadius.circular(10),
             child: InkWell(
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Calling is not wired up in this prototype.')),
-                );
+              onTap: () async {
+                final raw = phone.replaceAll(RegExp(r'\s'), '');
+                if (raw.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No fleet phone on file.')));
+                  return;
+                }
+                final uri = Uri(scheme: 'tel', path: raw);
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri);
+                }
               },
               borderRadius: BorderRadius.circular(10),
               child: const SizedBox(
@@ -2834,11 +3262,49 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _instructionCard() {
-    final cfg = switch (_step) {
-      0 => (bg: const Color(0xFF60A5FA).withValues(alpha: 0.06), border: const Color(0xFF60A5FA).withValues(alpha: 0.22), icon: _steps[0].icon, color: _steps[0].color, title: _labels[0], body: 'Tap "Start Journey" below to begin navigating to the breakdown location.'),
-      1 => (bg: AppColors.primary.withValues(alpha: 0.06), border: AppColors.primary.withValues(alpha: 0.22), icon: _steps[1].icon, color: _steps[1].color, title: _labels[1], body: 'You\'re on route. Tap "I\'ve Arrived" when you reach the location.'),
-      _ => (bg: AppColors.orange.withValues(alpha: 0.06), border: AppColors.orange.withValues(alpha: 0.22), icon: _steps[2].icon, color: _steps[2].color, title: _labels[2], body: 'Begin the repair. Tap the button below when you start work.'),
+  Widget _instructionCard(MechanicViewModel vm) {
+    final st = _displayStep(vm);
+    final cfg = switch (st) {
+      0 => (
+          bg: const Color(0xFF60A5FA).withValues(alpha: 0.06),
+          border: const Color(0xFF60A5FA).withValues(alpha: 0.22),
+          icon: _steps[0].icon,
+          color: _steps[0].color,
+          title: _labels[0],
+          body: 'Tap "Start Journey" below to begin navigating to the breakdown location.',
+        ),
+      1 => (
+          bg: AppColors.primary.withValues(alpha: 0.06),
+          border: AppColors.primary.withValues(alpha: 0.22),
+          icon: _steps[1].icon,
+          color: _steps[1].color,
+          title: _labels[1],
+          body: 'You\'re on route. Tap "I\'ve Arrived" when you reach the location.',
+        ),
+      2 => (
+          bg: AppColors.orange.withValues(alpha: 0.06),
+          border: AppColors.orange.withValues(alpha: 0.22),
+          icon: _steps[2].icon,
+          color: _steps[2].color,
+          title: _labels[2],
+          body: 'Begin the repair. Tap the button below when you start work.',
+        ),
+      3 => (
+          bg: AppColors.orange.withValues(alpha: 0.06),
+          border: AppColors.orange.withValues(alpha: 0.22),
+          icon: _steps[3].icon,
+          color: _steps[3].color,
+          title: _labels[3],
+          body: 'Enter billing details and repair notes below, then tap Complete Job.',
+        ),
+      _ => (
+          bg: AppColors.green.withValues(alpha: 0.06),
+          border: AppColors.green.withValues(alpha: 0.22),
+          icon: _steps[4].icon,
+          color: AppColors.green,
+          title: _labels[4],
+          body: 'This job is finished. Payment will confirm once the fleet approves.',
+        ),
     };
 
     return Container(
@@ -2871,7 +3337,7 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _jobInvoiceCard() {
+  Widget _jobInvoiceCard(MechanicViewModel vm) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2943,6 +3409,7 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
           Row(
             children: [
               Expanded(
+                flex: 3,
                 child: TextField(
                   controller: _labourHoursCtrl,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -2964,23 +3431,39 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                 ),
               ),
               const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.card2,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border2),
-                ),
-                child: const Text(
-                  '@ £65/hr',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+              Expanded(
+                flex: 2,
+                child: TextField(
+                  controller: _labourRateCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: AppColors.card2,
+                    isDense: true,
+                    prefixText: '@ £',
+                    prefixStyle: const TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 10),
+                    suffixText: '/hr',
+                    suffixStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.9), fontSize: 9, fontWeight: FontWeight.w600),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.border2),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: AppColors.primary.withValues(alpha: 0.6)),
+                    ),
+                  ),
+                  onChanged: (_) => setState(() {}),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            'Labour total: £${_labourTotal.toStringAsFixed(2)}',
+            'Labour total: £${_labourTotal(vm).toStringAsFixed(2)}',
             style: TextStyle(color: AppColors.textHint.withValues(alpha: 0.9), fontSize: 10),
           ),
           const SizedBox(height: 14),
@@ -3144,7 +3627,7 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                 const Text('Total Invoice', style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
                 const Spacer(),
                 Text(
-                  '£${_totalInvoice.toStringAsFixed(2)}',
+                  '£${_totalInvoice(vm).toStringAsFixed(2)}',
                   style: const TextStyle(color: AppColors.primary, fontSize: 16, fontWeight: FontWeight.w900),
                 ),
               ],
@@ -3191,7 +3674,31 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _doneEarningsCard() {
+  Widget _doneEarningsCard(MechanicViewModel vm) {
+    final completeData = mechanicWorkCompleteData(vm.jobWorkCompleteEnvelope);
+    final apiLines = mechanicCompletionLineAmounts(completeData);
+    final apiSub = mechanicCompletionSubtotal(completeData);
+
+    final rows = <Widget>[];
+    if (apiLines.isNotEmpty) {
+      for (var i = 0; i < apiLines.length; i++) {
+        final line = apiLines[i];
+        if (i > 0) rows.add(const SizedBox(height: 8));
+        rows.add(_kvRow(line.label, '£${line.amount.toStringAsFixed(2)}'));
+      }
+    } else {
+      rows.add(_kvRow('Call Out Charge', '£${_callOut.toStringAsFixed(2)}'));
+      rows.add(const SizedBox(height: 8));
+      rows.add(_kvRow(
+        'Labour (${_labourHoursCtrl.text.trim()} hrs @ £${_labourRate(vm).toStringAsFixed(0)}/hr)',
+        '£${_labourTotal(vm).toStringAsFixed(2)}',
+      ));
+      rows.add(const SizedBox(height: 8));
+      rows.add(_kvRow('Parts', '£${_partsTotal.toStringAsFixed(2)}'));
+    }
+
+    final total = apiSub > 0 ? apiSub : _totalInvoice(vm);
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -3213,11 +3720,7 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
             ],
           ),
           const SizedBox(height: 14),
-          _kvRow('Call Out Charge', '£${_callOut.toStringAsFixed(2)}'),
-          const SizedBox(height: 8),
-          _kvRow('Labour (${_labourHoursCtrl.text.trim()} hrs @ £65/hr)', '£${_labourTotal.toStringAsFixed(2)}'),
-          const SizedBox(height: 8),
-          _kvRow('Parts', '£${_partsTotal.toStringAsFixed(2)}'),
+          ...rows,
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.only(top: 12),
@@ -3235,7 +3738,7 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                 ),
                 const Spacer(),
                 Text(
-                  '£${_totalInvoice.toStringAsFixed(2)}',
+                  '£${total.toStringAsFixed(2)}',
                   style: const TextStyle(color: AppColors.primary, fontSize: 18, fontWeight: FontWeight.w900),
                 ),
               ],
@@ -3270,7 +3773,23 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _doneJobSummaryCard() {
+  Widget _doneJobSummaryCard(MechanicViewModel vm) {
+    final completeData = mechanicWorkCompleteData(vm.jobWorkCompleteEnvelope);
+    final js = mechanicJobSummaryFromComplete(completeData);
+    final d = vm.jobTrackerDetail;
+
+    String pick(String k) {
+      final v = js?[k];
+      if (v != null && v.toString().trim().isNotEmpty) return v.toString().trim();
+      return '';
+    }
+
+    final vehicle = pick('vehicleLine').isNotEmpty ? pick('vehicleLine') : (d?.vehicleLine ?? '—');
+    final fleet = pick('fleetName').isNotEmpty ? pick('fleetName') : (d?.fleetName ?? '—');
+    final issue = pick('issueLine').isNotEmpty ? pick('issueLine') : (d?.title ?? '—');
+    final completed = pick('submittedForApprovalLabel').isNotEmpty ? pick('submittedForApprovalLabel') : '—';
+    final duration = pick('durationLabel').isNotEmpty ? pick('durationLabel') : '—';
+
     Widget row(String label, String value) {
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3305,15 +3824,15 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
             style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.8),
           ),
           const SizedBox(height: 14),
-          row('Vehicle', 'Flatbed · WC 678-123'),
+          row('Vehicle', vehicle),
           const SizedBox(height: 10),
-          row('Fleet', 'Atlas Haulage Ltd'),
+          row('Fleet', fleet),
           const SizedBox(height: 10),
-          row('Issue', 'Right rear dual tyre blowout'),
+          row('Issue', issue),
           const SizedBox(height: 10),
-          row('Completed', '9 Mar 2026 · 16:44'),
+          row('Completed', completed),
           const SizedBox(height: 10),
-          row('Duration', '1 hr 22 min'),
+          row('Duration', duration),
         ],
       ),
     );
@@ -3358,14 +3877,14 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _reviewOverlay() {
+  Widget _reviewOverlay(MechanicViewModel vm) {
     if (!_showReview) return const SizedBox.shrink();
 
     return Positioned.fill(
       child: Material(
         color: Colors.black.withValues(alpha: 0.90),
         child: InkWell(
-          onTap: _reviewSubmitted ? null : () => setState(() => _showReview = false),
+          onTap: (_reviewSubmitted || _reviewSubmitBusy) ? null : () => setState(() => _showReview = false),
           child: Align(
             alignment: Alignment.bottomCenter,
             child: InkWell(
@@ -3409,10 +3928,10 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                             const SizedBox(height: 16),
                             const Text('Rate Fleet Operator', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w900)),
                             const SizedBox(height: 6),
-                            const Text(
-                              'How was your experience with Atlas Haulage Ltd?',
+                            Text(
+                              'How was your experience with ${vm.jobTrackerDetail?.fleetName ?? 'this fleet'}?',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                             ),
                             const SizedBox(height: 16),
                             Row(
@@ -3470,15 +3989,28 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
-                                onPressed: _rating == 0
+                                onPressed: _rating == 0 || _reviewSubmitBusy
                                     ? null
                                     : () async {
+                                        setState(() => _reviewSubmitBusy = true);
+                                        final err = await vm.submitJobFleetReview(
+                                          rating: _rating,
+                                          comment: _reviewCtrl.text.trim(),
+                                        );
+                                        if (!mounted) return;
+                                        setState(() => _reviewSubmitBusy = false);
+                                        if (err != null) {
+                                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+                                          return;
+                                        }
                                         setState(() => _reviewSubmitted = true);
-                                        await Future<void>.delayed(const Duration(milliseconds: 1500));
+                                        await Future<void>.delayed(const Duration(milliseconds: 1200));
                                         if (!mounted) return;
                                         setState(() {
                                           _showReview = false;
                                           _reviewSubmitted = false;
+                                          _rating = 0;
+                                          _reviewCtrl.clear();
                                         });
                                       },
                                 style: ElevatedButton.styleFrom(
@@ -3490,14 +4022,20 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                                   padding: const EdgeInsets.symmetric(vertical: 16),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
-                                child: const Text(
-                                  'SUBMIT REVIEW',
-                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.2),
-                                ),
+                                child: _reviewSubmitBusy
+                                    ? const SizedBox(
+                                        height: 22,
+                                        width: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                                      )
+                                    : const Text(
+                                        'SUBMIT REVIEW',
+                                        style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.2),
+                                      ),
                               ),
                             ),
                             TextButton(
-                              onPressed: () => setState(() => _showReview = false),
+                              onPressed: _reviewSubmitBusy ? null : () => setState(() => _showReview = false),
                               child: Text('Skip for now', style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.9), fontSize: 12)),
                             ),
                           ],
@@ -3511,30 +4049,32 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
     );
   }
 
-  Widget _cta() {
+  Widget _cta(MechanicViewModel vm) {
+    final st = _displayStep(vm);
+    final doneFlow = st >= 4 || (vm.jobTrackerDetail?.showCompletedSummary ?? false);
     String label;
-    Color bg;
+    Color bg = AppColors.primary;
     Color fg = Colors.black;
     IconData? icon;
 
-    switch (_step) {
-      case 0:
-        label = 'START JOURNEY →';
-        bg = AppColors.primary;
-      case 1:
-        label = 'I\'VE ARRIVED ✓';
-        bg = AppColors.primary;
-      case 2:
-        label = 'START WORK 🔧';
-        bg = AppColors.orange;
-      case 3:
-        label = 'COMPLETE JOB ✓';
-        bg = AppColors.green;
-        icon = Icons.flag_rounded;
-      default:
-        label = 'BACK TO MY JOBS';
-        bg = AppColors.primary;
+    if (doneFlow) {
+      label = 'BACK TO MY JOBS';
+    } else if (st == 0) {
+      label = 'START JOURNEY →';
+    } else if (st == 1) {
+      label = 'I\'VE ARRIVED ✓';
+    } else if (st == 2) {
+      label = 'START WORK 🔧';
+      bg = AppColors.orange;
+    } else if (st == 3) {
+      label = 'COMPLETE JOB ✓';
+      bg = AppColors.green;
+      icon = Icons.flag_rounded;
+    } else {
+      label = 'CONTINUE';
     }
+
+    final busy = vm.jobTrackerActionBusy;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -3545,38 +4085,94 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
       child: SizedBox(
         width: double.infinity,
         child: ElevatedButton(
-          onPressed: () async {
-            if (_step == 3) {
-              setState(() => _step = 4);
-              await Future<void>.delayed(const Duration(milliseconds: 500));
-              if (!mounted) return;
-              setState(() => _showReview = true);
-              return;
-            }
-            setState(() {
-              if (_step < 4) _step += 1;
-            });
-          },
+          onPressed: busy
+              ? null
+              : () async {
+                  final messenger = ScaffoldMessenger.maybeOf(context);
+                  if (doneFlow) {
+                    widget.onBack();
+                    return;
+                  }
+                  String? err;
+                  if (st == 0) {
+                    err = await vm.patchJobTrackerJourneyStart();
+                  } else if (st == 1) {
+                    err = await vm.patchJobTrackerArrive();
+                  } else if (st == 2) {
+                    err = await vm.patchJobTrackerWorkStart();
+                  } else if (st == 3) {
+                    final parts = <Map<String, dynamic>>[];
+                    for (final p in _parts) {
+                      final desc = p.name.text.trim();
+                      final amt = double.tryParse(p.cost.text.trim()) ?? 0;
+                      if (desc.isEmpty && amt == 0) continue;
+                      parts.add({'description': desc, 'amount': amt});
+                    }
+                    final invoice = <String, dynamic>{
+                      'callOutCharge': _callOut,
+                      'labourHours': _labourHours,
+                      'labourRatePerHour': _labourRate(vm),
+                      if (parts.isNotEmpty) 'parts': parts,
+                    };
+                    final photos = <http.MultipartFile>[];
+                    for (var i = 0; i < _photoFiles.length; i++) {
+                      final xf = _photoFiles[i];
+                      try {
+                        final bytes = await xf.readAsBytes();
+                        photos.add(
+                          MechanicApiService.buildCompletePhotoPart(
+                            bytes: bytes,
+                            originalName: xf.name,
+                            index: i,
+                          ),
+                        );
+                      } catch (_) {}
+                    }
+                    err = await vm.patchJobWorkComplete(
+                      repairNotes: _notesCtrl.text,
+                      invoice: invoice,
+                      finalAmount: _totalInvoice(vm),
+                      photos: photos,
+                    );
+                  }
+                  if (!mounted) return;
+                  if (err != null) {
+                    messenger?.showSnackBar(SnackBar(content: Text(err)));
+                    return;
+                  }
+                  if (st == 3) {
+                    await Future<void>.delayed(const Duration(milliseconds: 400));
+                    if (!mounted) return;
+                    setState(() => _showReview = true);
+                  }
+                },
           style: ElevatedButton.styleFrom(
             backgroundColor: bg,
             foregroundColor: fg,
+            disabledBackgroundColor: bg.withValues(alpha: 0.45),
             padding: const EdgeInsets.symmetric(vertical: 16),
             elevation: 0,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 18, color: Colors.black),
-                const SizedBox(width: 8),
-              ],
-              Text(
-                label,
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.4),
-              ),
-            ],
-          ),
+          child: busy
+              ? const SizedBox(
+                  height: 22,
+                  width: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, size: 18, color: Colors.black),
+                      const SizedBox(width: 8),
+                    ],
+                    Text(
+                      label,
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.4),
+                    ),
+                  ],
+                ),
         ),
       ),
     );
@@ -3584,14 +4180,63 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final showMapBlock = _step <= 2;
+    final vm = context.watch<MechanicViewModel>();
+    if (vm.jobTrackerLoading && vm.jobTrackerDetail == null) {
+      return ColoredBox(
+        color: AppColors.bg,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _header(vm),
+            const Expanded(
+              child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+            ),
+          ],
+        ),
+      );
+    }
+    if (vm.jobTrackerError != null && vm.jobTrackerDetail == null) {
+      return ColoredBox(
+        color: AppColors.bg,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _header(vm),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(vm.jobTrackerError!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textMuted, fontSize: 13)),
+                    const SizedBox(height: 16),
+                    OutlinedButton(
+                      onPressed: () => vm.loadJobTrackerDetail(),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final st = _displayStep(vm);
+    final completed = vm.jobTrackerDetail?.showCompletedSummary ?? false;
+    final showMapBlock = st <= 2 && !completed;
+    final d = vm.jobTrackerDetail;
+    final hasRoute = d?.mechanicLngLat != null && d?.jobDestinationLngLat != null;
+    final mapBreakdown = d?.mapBreakdownLngLat;
+
     return Stack(
       children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _header(),
-            _timeline(),
+            _header(vm),
+            _timeline(vm),
             Expanded(
               child: showMapBlock
                   ? SingleChildScrollView(
@@ -3599,11 +4244,20 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          TruckFixMapPreview(height: 125, showRoute: true, liveLabel: false),
+                          if (!kIsWeb && mapBreakdown != null)
+                            JobLocationGoogleMapPreview(
+                              height: 125,
+                              lat: mapBreakdown.lat,
+                              lng: mapBreakdown.lng,
+                              mechanicLat: d?.mechanicLngLat?.lat,
+                              mechanicLng: d?.mechanicLngLat?.lng,
+                            )
+                          else
+                            TruckFixMapPreview(height: 125, showRoute: hasRoute, liveLabel: false),
                           const SizedBox(height: 12),
-                          _jobCard(orangeAccent: false),
+                          _jobCard(vm, orangeAccent: false),
                           const SizedBox(height: 12),
-                          _instructionCard(),
+                          _instructionCard(vm),
                         ],
                       ),
                     )
@@ -3612,10 +4266,10 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _jobCard(orangeAccent: true),
+                          _jobCard(vm, orangeAccent: true),
                           const SizedBox(height: 12),
-                          if (_step == 3) ...[
-                            _jobInvoiceCard(),
+                          if (st == 3 && !completed) ...[
+                            _jobInvoiceCard(vm),
                             const SizedBox(height: 14),
                             Text(
                               'REPAIR NOTES',
@@ -3670,9 +4324,11 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                                   child: _PhotoPickerButton(
                                     icon: Icons.camera_alt_outlined,
                                     label: 'Camera',
-                                    onTap: () => setState(() {
-                                      if (_photos.length < 5) _photos.add(AppAssets.truckWorkshop);
-                                    }),
+                                    onTap: () async {
+                                      if (_photoFiles.length >= 5) return;
+                                      final x = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 2000, imageQuality: 85);
+                                      if (x != null && mounted) setState(() => _photoFiles.add(x));
+                                    },
                                   ),
                                 ),
                                 const SizedBox(width: 10),
@@ -3680,27 +4336,33 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                                   child: _PhotoPickerButton(
                                     icon: Icons.inventory_2_outlined,
                                     label: 'Gallery',
-                                    onTap: () => setState(() {
-                                      if (_photos.length < 5) _photos.add(AppAssets.truckWorkshop);
-                                    }),
+                                    onTap: () async {
+                                      if (_photoFiles.length >= 5) return;
+                                      final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 2000, imageQuality: 85);
+                                      if (x != null && mounted) setState(() => _photoFiles.add(x));
+                                    },
                                   ),
                                 ),
                               ],
                             ),
-                            if (_photos.isNotEmpty) ...[
+                            if (_photoFiles.isNotEmpty) ...[
                               const SizedBox(height: 12),
                               Wrap(
                                 spacing: 10,
                                 runSpacing: 10,
                                 children: [
-                                  for (int i = 0; i < _photos.length; i++)
-                                    _PhotoThumb(
-                                      url: _photos[i],
-                                      onRemove: () => setState(() => _photos.removeAt(i)),
+                                  for (int i = 0; i < _photoFiles.length; i++)
+                                    _LocalPhotoThumb(
+                                      path: _photoFiles[i].path,
+                                      onRemove: () => setState(() => _photoFiles.removeAt(i)),
                                     ),
-                                  if (_photos.length < 5)
+                                  if (_photoFiles.length < 5)
                                     _PhotoAddStub(
-                                      onTap: () => setState(() => _photos.add(AppAssets.truckWorkshop)),
+                                      onTap: () async {
+                                        if (_photoFiles.length >= 5) return;
+                                        final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 2000, imageQuality: 85);
+                                        if (x != null && mounted) setState(() => _photoFiles.add(x));
+                                      },
                                     ),
                                 ],
                               ),
@@ -3708,9 +4370,9 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                           ] else ...[
                             _doneSuccessCard(),
                             const SizedBox(height: 12),
-                            _doneEarningsCard(),
+                            _doneEarningsCard(vm),
                             const SizedBox(height: 12),
-                            _doneJobSummaryCard(),
+                            _doneJobSummaryCard(vm),
                             const SizedBox(height: 12),
                             _doneAwaitingRatingCard(),
                           ],
@@ -3718,10 +4380,54 @@ class _JobTrackerPageState extends State<_JobTrackerPage> {
                       ),
                     ),
             ),
-            _cta(),
+            _cta(vm),
           ],
         ),
-        _reviewOverlay(),
+        _reviewOverlay(vm),
+      ],
+    );
+  }
+}
+
+class _LocalPhotoThumb extends StatelessWidget {
+  const _LocalPhotoThumb({required this.path, required this.onRemove});
+
+  final String path;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            width: 68,
+            height: 68,
+            child: Image.file(
+              File(path),
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(color: AppColors.card2),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: Material(
+            color: Colors.black.withValues(alpha: 0.70),
+            shape: const CircleBorder(),
+            child: InkWell(
+              onTap: onRemove,
+              customBorder: const CircleBorder(),
+              child: const SizedBox(
+                width: 18,
+                height: 18,
+                child: Icon(Icons.close_rounded, size: 12, color: Colors.white),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -3761,50 +4467,6 @@ class _PhotoPickerButton extends StatelessWidget {
   }
 }
 
-class _PhotoThumb extends StatelessWidget {
-  const _PhotoThumb({required this.url, required this.onRemove});
-  final String url;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: SizedBox(
-            width: 68,
-            height: 68,
-            child: CachedNetworkImage(
-              imageUrl: url,
-              fit: BoxFit.cover,
-              placeholder: (_, __) => Container(color: AppColors.card2),
-              errorWidget: (_, __, ___) => Container(color: AppColors.card2),
-            ),
-          ),
-        ),
-        Positioned(
-          top: 4,
-          right: 4,
-          child: Material(
-            color: Colors.black.withValues(alpha: 0.70),
-            shape: const CircleBorder(),
-            child: InkWell(
-              onTap: onRemove,
-              customBorder: const CircleBorder(),
-              child: const SizedBox(
-                width: 18,
-                height: 18,
-                child: Icon(Icons.close_rounded, size: 12, color: Colors.white),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _PhotoAddStub extends StatelessWidget {
   const _PhotoAddStub({required this.onTap});
   final VoidCallback onTap;
@@ -3826,6 +4488,54 @@ class _PhotoAddStub extends StatelessWidget {
           child: const Center(child: Icon(Icons.play_arrow_rounded, color: AppColors.textHint)),
         ),
       ),
+    );
+  }
+}
+
+class _TimelineNodeApi extends StatelessWidget {
+  const _TimelineNodeApi({required this.step, required this.icon});
+
+  final MechanicWorkflowStepUi step;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final showCheck = step.done;
+    final cur = step.active;
+    final border = showCheck || cur ? AppColors.primary : AppColors.border2;
+    final bg = showCheck ? AppColors.primary : (cur ? AppColors.primary.withValues(alpha: 0.15) : AppColors.card2);
+
+    return Column(
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: bg,
+            shape: BoxShape.circle,
+            border: Border.all(color: border, width: 2),
+          ),
+          child: showCheck
+              ? const Icon(Icons.check_rounded, size: 16, color: Colors.black)
+              : Icon(icon, size: 14, color: cur ? AppColors.primary : AppColors.textHint),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 52,
+          child: Text(
+            step.label.isNotEmpty ? step.label : step.key,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 8,
+              height: 1.1,
+              fontWeight: FontWeight.w600,
+              color: cur ? AppColors.primary : showCheck ? AppColors.textMuted : AppColors.textHint,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3880,28 +4590,28 @@ class _TimelineNode extends StatelessWidget {
   }
 }
 
-class _EarnJob {
-  const _EarnJob({
-    required this.id,
-    required this.truck,
-    required this.issue,
-    required this.fleet,
-    required this.date,
-    required this.gross,
-    required this.net,
-    required this.rating,
-    required this.hours,
-  });
+String _mechEarnPctLabel(double pct) => pct == pct.roundToDouble() ? '${pct.round()}' : pct.toStringAsFixed(1);
 
-  final String id;
-  final String truck;
-  final String issue;
-  final String fleet;
-  final String date;
-  final int gross;
-  final int net;
-  final int rating;
-  final String hours;
+String _mechEarnMoneyAbs(double amount, String currency) {
+  final cur = currency.toUpperCase().trim().isEmpty ? 'GBP' : currency.trim().toUpperCase();
+  if (cur == 'GBP') {
+    if (amount == amount.roundToDouble()) return '£${amount.round()}';
+    return '£${amount.toStringAsFixed(2)}';
+  }
+  if (amount == amount.roundToDouble()) return '$cur ${amount.round()}';
+  return '$cur ${amount.toStringAsFixed(2)}';
+}
+
+String _mechEarnNegativeMoney(double fee, String currency) {
+  if (fee == 0) return _mechEarnMoneyAbs(0, currency);
+  return '-${_mechEarnMoneyAbs(fee, currency)}'.replaceFirst('--', '-');
+}
+
+Map<String, dynamic>? _mechEarningUnwrapEnvelope(Map<String, dynamic>? raw) {
+  if (raw == null) return null;
+  final d = raw['data'];
+  if (d is Map<String, dynamic>) return d;
+  return raw;
 }
 
 class _MechanicEarnings extends StatefulWidget {
@@ -3914,21 +4624,13 @@ class _MechanicEarnings extends StatefulWidget {
 }
 
 class _MechanicEarningsState extends State<_MechanicEarnings> {
-  // Completed jobs list remains demo until a dedicated jobs-history API is added.
-  static const _jobs = <_EarnJob>[
-    _EarnJob(id: 'TF-8810', truck: 'Rigid 8T · GP 221-560', issue: 'Fuel system fault', fleet: 'Logistix Transport', date: '7 Mar 2026', gross: 185, net: 163, rating: 5, hours: '1h 45m'),
-    _EarnJob(id: 'TF-8797', truck: 'Flatbed · WC 334-112', issue: 'Tyre replacement x2', fleet: 'Peak Haulage Ltd', date: '5 Mar 2026', gross: 140, net: 123, rating: 5, hours: '55m'),
-    _EarnJob(id: 'TF-8782', truck: 'Tautliner · CA 100-221', issue: 'Air brake adjustment', fleet: 'Swift Freight', date: '3 Mar 2026', gross: 220, net: 194, rating: 4, hours: '2h 10m'),
-    _EarnJob(id: 'TF-8771', truck: 'Tanker · KZN 44-310', issue: 'Coolant system flush', fleet: 'Bulk Trans UK', date: '28 Feb 2026', gross: 165, net: 145, rating: 5, hours: '1h 20m'),
-    _EarnJob(id: 'TF-8760', truck: 'Rigid 18T · WC 887-002', issue: 'Engine diagnostics', fleet: 'Logistix Transport', date: '25 Feb 2026', gross: 95, net: 84, rating: 4, hours: '40m'),
-    _EarnJob(id: 'TF-8744', truck: 'Flatbed · GP 551-889', issue: 'Suspension repair', fleet: 'Peak Haulage Ltd', date: '21 Feb 2026', gross: 310, net: 273, rating: 5, hours: '3h 05m'),
-  ];
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<MechanicViewModel>().loadEarnings();
+      final vm = context.read<MechanicViewModel>();
+      vm.loadEarnings();
+      vm.loadEarningsJobs();
     });
   }
 
@@ -4052,8 +4754,7 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
     );
   }
 
-  Widget _jobCard(_EarnJob job) {
-    final fee = job.gross - job.net;
+  Widget _jobCard(BuildContext context, MechanicViewModel vm, MechanicCompletedEarningJob job) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -4075,22 +4776,34 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                     children: [
                       Row(
                         children: [
-                          Text(job.id, style: const TextStyle(color: AppColors.textMuted, fontSize: 10, fontFamily: 'monospace')),
+                          Text(
+                            job.jobCode.isNotEmpty ? job.jobCode : '—',
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 10, fontFamily: 'monospace'),
+                          ),
                           Text(' · ', style: TextStyle(color: AppColors.textHint.withValues(alpha: 0.8), fontSize: 10)),
-                          Text(job.date, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10)),
+                          Text(job.dateLabel, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10)),
                         ],
                       ),
                       const SizedBox(height: 4),
-                      Text(job.truck, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      Text(
+                        job.vehicleLine.isNotEmpty ? job.vehicleLine : '—',
+                        style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
                       const SizedBox(height: 2),
-                      Text(job.issue, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
+                      Text(
+                        job.issueLine.isNotEmpty ? job.issueLine : '—',
+                        style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+                      ),
                     ],
                   ),
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text('£${job.net}', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w900, fontSize: 15)),
+                    Text(
+                      job.netEarnedDisplay,
+                      style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w900, fontSize: 15),
+                    ),
                     const Text('net earned', style: TextStyle(color: AppColors.textMuted, fontSize: 9)),
                   ],
                 ),
@@ -4108,7 +4821,7 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                 Text(' · ', style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.7), fontSize: 10)),
                 Expanded(
                   child: Text(
-                    job.fleet,
+                    job.customerName.isNotEmpty ? job.customerName : '—',
                     style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -4116,7 +4829,10 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                 Text(' · ', style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.7), fontSize: 10)),
                 const Icon(Icons.access_time_rounded, size: 12, color: AppColors.textMuted),
                 const SizedBox(width: 2),
-                Text(job.hours, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10)),
+                Text(
+                  job.durationLabel.isNotEmpty ? job.durationLabel : '—',
+                  style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10),
+                ),
               ],
             ),
             const Padding(
@@ -4128,7 +4844,7 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
               color: AppColors.card2,
               borderRadius: BorderRadius.circular(12),
               child: InkWell(
-                onTap: () => _showInvoiceSheet(job, fee),
+                onTap: () => _showInvoiceSheet(context, vm, job),
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
                   decoration: BoxDecoration(
@@ -4142,15 +4858,18 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Gross', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-                          Text('£${job.gross}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
+                          Text(job.grossDisplay, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
                         ],
                       ),
                       const SizedBox(height: 4),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Fee (12%)', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-                          Text('-£$fee', style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10)),
+                          Text(
+                            'Fee (${job.platformFeePercent}%)',
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                          ),
+                          Text(job.feeDisplay, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10)),
                         ],
                       ),
                       const Padding(
@@ -4162,7 +4881,7 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Net', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900)),
-                          Text('£${job.net}', style: const TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900)),
+                          Text(job.netDisplay, style: const TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900)),
                         ],
                       ),
                       const Padding(
@@ -4192,69 +4911,188 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
     );
   }
 
-  void _showInvoiceSheet(_EarnJob job, int fee) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+  Widget _mechInvoiceKv(String k, String v) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 118, child: Text(k, style: TextStyle(color: AppColors.textMuted, fontSize: 11))),
+          Expanded(child: Text(v, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600))),
+        ],
       ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(color: AppColors.border2, borderRadius: BorderRadius.circular(999)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text('INV-${job.id}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16)),
-              Text(job.date, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-              const SizedBox(height: 16),
-              Text(job.truck, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-              Text(job.issue, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-              const SizedBox(height: 16),
-              _sheetRow('Gross', '£${job.gross}'),
-              _sheetRow('Fee (12%)', '-£$fee'),
-              const Divider(color: AppColors.border),
-              _sheetRow('Net', '£${job.net}', highlight: true),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: const Text('Close', style: TextStyle(fontWeight: FontWeight.w900)),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
-  Widget _sheetRow(String k, String v, {bool highlight = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(k, style: TextStyle(color: highlight ? AppColors.primary : AppColors.textMuted, fontWeight: highlight ? FontWeight.w900 : FontWeight.w400, fontSize: 12)),
-          Text(v, style: TextStyle(color: highlight ? AppColors.primary : Colors.white, fontWeight: highlight ? FontWeight.w900 : FontWeight.w600, fontSize: 12)),
-        ],
+  Widget _mechInvoiceSheetBody(BuildContext context, MechanicCompletedEarningJob job, Map<String, dynamic> inv) {
+    String pickStr(String snake, [String camel = '']) {
+      final keys = camel.isEmpty ? <String>[snake] : <String>[snake, camel];
+      for (final k in keys) {
+        final raw = inv[k];
+        if (raw == null) continue;
+        final s = raw.toString().trim();
+        if (s.isNotEmpty) return s;
+      }
+      return '';
+    }
+
+    final invNoPick = pickStr('invoice_no', 'invoiceNo');
+    final invoiceNoLine = invNoPick.isNotEmpty ? invNoPick : job.invoiceNo.trim();
+
+    final statusPick = pickStr('status').trim();
+    final paidPick = pickStr('paid_at', 'paidAt');
+
+    final grossPickStr = pickStr('gross_amount', 'grossAmount');
+    final netPickStr = pickStr('net_amount', 'netAmount');
+    final curPick = pickStr('currency');
+    final cur = curPick.isEmpty ? job.currency : curPick;
+
+    final pdfInline = pickStr('pdf_url', 'pdfUrl');
+
+    final grossParsed = grossPickStr.isNotEmpty ? double.tryParse(grossPickStr) : null;
+    final netParsed = netPickStr.isNotEmpty ? double.tryParse(netPickStr) : null;
+
+    final rows = <Widget>[
+      if (job.jobCode.isNotEmpty) _mechInvoiceKv('Job code', job.jobCode),
+      if (invoiceNoLine.isNotEmpty) _mechInvoiceKv('Invoice #', invoiceNoLine),
+      if (statusPick.isNotEmpty) _mechInvoiceKv('Status', statusPick),
+      if (paidPick.isNotEmpty) _mechInvoiceKv('Paid', paidPick),
+      _mechInvoiceKv('Gross', _mechEarnMoneyAbs(grossParsed ?? job.grossAmount, cur)),
+      _mechInvoiceKv(
+        'Fee (${_mechEarnPctLabel(job.platformFeePercent.toDouble())}%)',
+        _mechEarnNegativeMoney(job.platformFeeAmount, cur),
       ),
+      _mechInvoiceKv('Net', _mechEarnMoneyAbs(netParsed ?? job.netAmount, cur)),
+    ];
+
+    if (pdfInline.trim().startsWith('http')) {
+      final url = pdfInline.trim();
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: FilledButton.icon(
+            onPressed: () async {
+              final u = Uri.tryParse(url);
+              if (u != null && await canLaunchUrl(u)) {
+                await launchUrl(u, mode: LaunchMode.externalApplication);
+              }
+            },
+            icon: const Icon(Icons.picture_as_pdf_outlined, color: Colors.black, size: 20),
+            label: const Text('Open PDF', style: TextStyle(fontWeight: FontWeight.w900)),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.black,
+              minimumSize: const Size(double.infinity, 44),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
+  }
+
+  void _showInvoiceSheet(BuildContext context, MechanicViewModel vm, MechanicCompletedEarningJob job) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final href = job.invoiceDownloadPath.trim();
+    if (href.isEmpty) {
+      messenger?.showSnackBar(const SnackBar(content: Text('No invoice link for this job.')));
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final bottom = MediaQuery.paddingOf(ctx).bottom;
+        return Padding(
+          padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top + 12),
+          child: SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.56,
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F0F0F),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                border: Border(top: BorderSide(color: AppColors.border2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Invoice',
+                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: Icon(Icons.close_rounded, color: AppColors.textMuted.withValues(alpha: 0.9)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1, color: Color(0xFF1A1A1A)),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(20, 16, 20, 24 + bottom),
+                      child: FutureBuilder<Map<String, dynamic>>(
+                        future: vm.fetchMechanicAuthorizedGet(href),
+                        builder: (_, snapshot) {
+                          if (snapshot.connectionState != ConnectionState.done) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 32),
+                              child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Text(
+                              snapshot.error.toString(),
+                              style: TextStyle(color: AppColors.red.withValues(alpha: 0.9), fontSize: 13, height: 1.35),
+                            );
+                          }
+                          final envelope = snapshot.data!;
+                          final inv = _mechEarningUnwrapEnvelope(envelope) ?? envelope;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                job.vehicleLine,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(job.issueLine, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                              const SizedBox(height: 16),
+                              _mechInvoiceSheetBody(context, job, inv),
+                              const SizedBox(height: 20),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.primary,
+                                    foregroundColor: Colors.black,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  ),
+                                  child: const Text('Close', style: TextStyle(fontWeight: FontWeight.w900)),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -4371,11 +5209,48 @@ class _MechanicEarningsState extends State<_MechanicEarnings> {
                         style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 2),
                       ),
                     ),
-                    Text('${_jobs.length} jobs', style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                    Text(
+                      '${vm.earningsJobsMeta?.total ?? vm.earningsJobs.length} jobs',
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                ..._jobs.map(_jobCard),
+                if (vm.earningsJobsLoading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+                  )
+                else if (vm.earningsJobsError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: AppColors.textMuted, size: 14),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            vm.earningsJobsError!,
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: vm.loadEarningsJobs,
+                          child: const Text('Retry', style: TextStyle(color: AppColors.primary, fontSize: 11)),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (vm.earningsJobs.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Text(
+                      'No completed jobs yet.',
+                      style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.9), fontSize: 12),
+                    ),
+                  )
+                else
+                  ...vm.earningsJobs.map((j) => _jobCard(context, vm, j)),
               ],
             ),
           ),
@@ -4395,32 +5270,60 @@ class _MechanicEditProfile extends StatefulWidget {
 }
 
 class _MechanicEditProfileState extends State<_MechanicEditProfile> {
-  static const int _origHourly = 75;
-  static const int _origEmergency = 95;
-
-  final _nameCtrl = TextEditingController(text: 'James Mitchell');
-  final _phoneCtrl = TextEditingController(text: '+44 7734 567 890');
-  final _emailCtrl = TextEditingController(text: 'themba@truckfix.co.uk');
-  final _hourlyCtrl = TextEditingController(text: '75');
-  final _emergencyCtrl = TextEditingController(text: '95');
-  final _bankNameCtrl = TextEditingController(text: 'Barclays');
-  final _accountCtrl = TextEditingController(text: '12345678');
-  final _sortCtrl = TextEditingController(text: '20-14-55');
-  final _billingCtrl = TextEditingController(text: '14 Workshop Lane, Manchester M1 2AB');
-  final _vatCtrl = TextEditingController(text: 'GB 345 7821 00');
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _hourlyCtrl = TextEditingController();
+  final _emergencyCtrl = TextEditingController();
+  final _bankNameCtrl = TextEditingController();
+  final _accountCtrl = TextEditingController();
+  final _sortCtrl = TextEditingController();
+  final _billingCtrl = TextEditingController();
+  final _vatCtrl = TextEditingController();
 
   /// 'yes' | 'no' — matches React select.
   String _vatRegistered = 'yes';
 
   bool _showReapproval = false;
+  bool _seededFromServer = false;
+  int? _baselineHourly;
+  int? _baselineEmergency;
 
   bool get _ratesChanged {
     final h = int.tryParse(_hourlyCtrl.text.trim());
     final e = int.tryParse(_emergencyCtrl.text.trim());
-    return (h ?? _origHourly) != _origHourly || (e ?? _origEmergency) != _origEmergency;
+    final bh = _baselineHourly;
+    if (bh == null) return false;
+    if (h != bh) return true;
+    final be = _baselineEmergency;
+    if (be == null) return e != null;
+    return e != be;
   }
 
   void _onRateFieldChanged() => setState(() {});
+
+  static String _rateFieldText(num? r) {
+    if (r == null) return '';
+    if (r == r.roundToDouble()) return r.round().toString();
+    return r.toString();
+  }
+
+  void _seedFromProfile(MechanicMeProfile p) {
+    _nameCtrl.text = p.displayName;
+    _phoneCtrl.text = p.phone;
+    _emailCtrl.text = p.email;
+    _hourlyCtrl.text = _rateFieldText(p.hourlyRate);
+    _emergencyCtrl.text = _rateFieldText(p.emergencyRate);
+    _bankNameCtrl.text = p.bankDisplayName ?? '';
+    _accountCtrl.text = p.bankAccountMasked ?? '';
+    _sortCtrl.text = p.bankSortCode ?? '';
+    _billingCtrl.text = p.billingAddress ?? '';
+    _vatCtrl.text = p.vatNumber ?? '';
+    _vatRegistered = p.vatRegistered ? 'yes' : 'no';
+    _baselineHourly = p.hourlyRate == null ? null : (p.hourlyRate as num).round();
+    _baselineEmergency = p.emergencyRate == null ? null : (p.emergencyRate as num).round();
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
@@ -4611,7 +5514,44 @@ class _MechanicEditProfileState extends State<_MechanicEditProfile> {
     );
   }
 
-  void _onSave() {
+  Future<void> _onSave() async {
+    final vm = context.read<MechanicViewModel>();
+    final hourly = int.tryParse(_hourlyCtrl.text.trim());
+    if (hourly == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid hourly rate')));
+      return;
+    }
+    final emRaw = _emergencyCtrl.text.trim();
+    final emParsed = int.tryParse(emRaw);
+    if (emRaw.isNotEmpty && emParsed == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid emergency rate or leave it blank')));
+      return;
+    }
+    final int? emergencyRate = emRaw.isEmpty ? null : emParsed;
+
+    try {
+      await vm.saveMechanicProfileFromEdit(
+        displayName: _nameCtrl.text,
+        email: _emailCtrl.text,
+        phone: _phoneCtrl.text,
+        hourlyRate: hourly,
+        emergencyRate: emergencyRate,
+        bankDisplayName: _bankNameCtrl.text,
+        bankAccountField: _accountCtrl.text,
+        bankSortCode: _sortCtrl.text,
+        billingAddress: _billingCtrl.text,
+        vatNumber: _vatCtrl.text,
+        vatRegistered: _vatRegistered == 'yes',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+
+    if (!mounted) return;
     if (_ratesChanged) {
       setState(() => _showReapproval = true);
     } else {
@@ -4621,6 +5561,16 @@ class _MechanicEditProfileState extends State<_MechanicEditProfile> {
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<MechanicViewModel>();
+    final p = vm.meProfile;
+    if (!_seededFromServer && p != null && !vm.meProfileLoading) {
+      _seededFromServer = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _seedFromProfile(p);
+      });
+    }
+
     if (_showReapproval) {
       return ColoredBox(
         color: AppColors.bg,
@@ -4907,17 +5857,23 @@ class _MechanicEditProfileState extends State<_MechanicEditProfile> {
                     width: double.infinity,
                     height: 52,
                     child: ElevatedButton(
-                      onPressed: _onSave,
+                      onPressed: vm.meProfilePatchBusy ? null : _onSave,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.black,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         elevation: 0,
                       ),
-                      child: const Text(
-                        'SAVE CHANGES',
-                        style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 13),
-                      ),
+                      child: vm.meProfilePatchBusy
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                            )
+                          : const Text(
+                              'SAVE CHANGES',
+                              style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 13),
+                            ),
                     ),
                   ),
                   TextButton(
@@ -4937,22 +5893,6 @@ class _MechanicEditProfileState extends State<_MechanicEditProfile> {
   }
 }
 
-class _PaymentMethodItem {
-  _PaymentMethodItem({
-    required this.id,
-    required this.brand,
-    required this.last4,
-    required this.expires,
-    required this.isDefault,
-  });
-
-  final String id;
-  final String brand;
-  final String last4;
-  final String expires;
-  bool isDefault;
-}
-
 class _MechPayment extends StatefulWidget {
   const _MechPayment({required this.onClose});
 
@@ -4963,43 +5903,229 @@ class _MechPayment extends StatefulWidget {
 }
 
 class _MechPaymentState extends State<_MechPayment> {
-  late List<_PaymentMethodItem> _cards;
+  bool _showAddForm = false;
+  bool _saveBusy = false;
+
+  final _cardNumCtrl = TextEditingController();
+  final _expiryCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _cards = [
-      _PaymentMethodItem(id: 'visa', brand: 'Visa', last4: '4242', expires: '12/26', isDefault: true),
-      _PaymentMethodItem(id: 'mc', brand: 'Mastercard', last4: '8888', expires: '09/25', isDefault: false),
-    ];
-  }
-
-  void _setDefault(String id) {
-    setState(() {
-      for (final c in _cards) {
-        c.isDefault = c.id == id;
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MechanicViewModel>().loadBillingPaymentMethods();
     });
   }
 
-  void _remove(String id) {
-    setState(() {
-      final wasDefault = _cards.firstWhere((c) => c.id == id).isDefault;
-      _cards.removeWhere((c) => c.id == id);
-      if (_cards.isNotEmpty && wasDefault) {
-        _cards.first.isDefault = true;
-      }
-    });
+  @override
+  void dispose() {
+    _cardNumCtrl.dispose();
+    _expiryCtrl.dispose();
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  static String _digitsOnly(String s) => s.replaceAll(RegExp(r'\D'), '');
+
+  /// Parses `MM/YY`, `MMYY`, or `MM / YY`.
+  static ({int month, int year})? _parseExpiry(String raw) {
+    final d = _digitsOnly(raw);
+    if (d.length == 4) {
+      final m = int.tryParse(d.substring(0, 2));
+      var y2 = int.tryParse(d.substring(2, 4));
+      if (m == null || y2 == null || m < 1 || m > 12) return null;
+      final y = y2 < 100 ? 2000 + y2 : y2;
+      return (month: m, year: y);
+    }
+    return null;
+  }
+
+  static String _inferCardBrandLower(String digits) {
+    if (digits.isEmpty) return 'visa';
+    if (digits.startsWith('4')) return 'visa';
+    if (digits.length >= 2) {
+      final p2 = int.tryParse(digits.substring(0, 2)) ?? 0;
+      if (p2 >= 51 && p2 <= 55) return 'mastercard';
+      if (p2 == 22 || p2 == 23 || p2 == 24 || p2 == 25 || p2 == 26 || p2 == 27) return 'mastercard';
+    }
+    if (digits.startsWith('34') || digits.startsWith('37')) return 'amex';
+    return 'visa';
+  }
+
+  Future<void> _setDefault(String id) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await context.read<MechanicViewModel>().setDefaultBillingPaymentMethod(id);
+      if (!mounted) return;
+      messenger?.showSnackBar(const SnackBar(content: Text('Default card updated')));
+    } catch (e) {
+      if (!mounted) return;
+      messenger?.showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  Future<void> _remove(String id) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await context.read<MechanicViewModel>().deleteBillingPaymentMethod(id);
+      if (!mounted) return;
+      messenger?.showSnackBar(const SnackBar(content: Text('Card removed')));
+    } catch (e) {
+      if (!mounted) return;
+      messenger?.showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   void _addCard() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Add card flow — connect to your payment provider')),
+    setState(() => _showAddForm = !_showAddForm);
+    if (!_showAddForm) {
+      _cardNumCtrl.clear();
+      _expiryCtrl.clear();
+      _nameCtrl.clear();
+    }
+  }
+
+  Future<void> _saveCard() async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final digits = _digitsOnly(_cardNumCtrl.text);
+    if (digits.length < 13 || digits.length > 16) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Enter a valid card number (13–16 digits).')));
+      return;
+    }
+    final last4 = digits.substring(digits.length - 4);
+    final exp = _parseExpiry(_expiryCtrl.text);
+    if (exp == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Enter expiry as MM/YY')));
+      return;
+    }
+    final brand = _inferCardBrandLower(digits);
+    setState(() => _saveBusy = true);
+    try {
+      await context.read<MechanicViewModel>().createBillingPaymentMethod(
+        cardBrandLower: brand,
+        last4: last4,
+        expMonth: exp.month,
+        expYear: exp.year,
+      );
+      if (!mounted) return;
+      setState(() {
+        _showAddForm = false;
+        _cardNumCtrl.clear();
+        _expiryCtrl.clear();
+        _nameCtrl.clear();
+      });
+      messenger?.showSnackBar(const SnackBar(content: Text('Card saved')));
+    } catch (e) {
+      if (!mounted) return;
+      messenger?.showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      if (mounted) setState(() => _saveBusy = false);
+    }
+  }
+
+  static InputDecoration _inputDeco(String hint) => InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Color(0xFF4B5563), fontSize: 13),
+        filled: true,
+        fillColor: Color(0xFF111111),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFF2A2A2A)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.primary),
+        ),
+      );
+
+  Widget _addCardForm() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.40)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'NEW CARD DETAILS',
+            style: TextStyle(
+              color: AppColors.primary,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.6,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('CARD NUMBER', style: TextStyle(color: Color(0xFF6B7280), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _cardNumCtrl,
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(16),
+            ],
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: _inputDeco('1234 5678 9012 3456'),
+          ),
+          const SizedBox(height: 14),
+          const Text('EXPIRY', style: TextStyle(color: Color(0xFF6B7280), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _expiryCtrl,
+            keyboardType: TextInputType.datetime,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: _inputDeco('MM/YY'),
+          ),
+          const SizedBox(height: 14),
+          const Text('CARDHOLDER NAME', style: TextStyle(color: Color(0xFF6B7280), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _nameCtrl,
+            textCapitalization: TextCapitalization.words,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            decoration: _inputDeco('John Smith'),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: _saveBusy ? null : _saveCard,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+                disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.55),
+                disabledForegroundColor: Colors.black54,
+              ),
+              child: _saveBusy
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                    )
+                  : const Text(
+                      'SAVE CARD',
+                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1.2),
+                    ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<MechanicViewModel>();
     return ColoredBox(
       color: AppColors.bg,
       child: Column(
@@ -5040,11 +6166,40 @@ class _MechPaymentState extends State<_MechPayment> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
               children: [
-                for (final card in _cards) ...[
+                if (vm.billingPaymentMethodsLoading && vm.billingPaymentMethods.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+                  )
+                else if (vm.billingPaymentMethodsError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: AppColors.textMuted, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            vm.billingPaymentMethodsError!,
+                            style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => vm.loadBillingPaymentMethods(),
+                          child: const Text('Retry', style: TextStyle(color: AppColors.primary, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                for (final card in vm.billingPaymentMethods) ...[
                   _paymentCard(card),
                   const SizedBox(height: 14),
                 ],
                 _DashedAddCardButton(onTap: _addCard),
+                if (_showAddForm) ...[
+                  const SizedBox(height: 14),
+                  _addCardForm(),
+                ],
               ],
             ),
           ),
@@ -5053,7 +6208,7 @@ class _MechPaymentState extends State<_MechPayment> {
     );
   }
 
-  Widget _paymentCard(_PaymentMethodItem card) {
+  Widget _paymentCard(FleetBillingPaymentMethod card) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card,
@@ -5082,11 +6237,11 @@ class _MechPaymentState extends State<_MechPayment> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${card.brand} •••• ${card.last4}',
+                      '${card.displayBrand} •••• ${card.last4}',
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15),
                     ),
                     const SizedBox(height: 4),
-                    Text('Expires ${card.expires}', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                    Text('Expires ${card.expiryLabel}', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
                   ],
                 ),
               ),
@@ -5271,16 +6426,105 @@ class _MechanicProfile extends StatefulWidget {
 }
 
 class _MechanicProfileState extends State<_MechanicProfile> {
-  bool _notifEnabled = true;
+  late final MechanicViewModel _vm;
+  late final VoidCallback _vmListen;
+  MechanicMeProfile? _syncedFromProfile;
+
+  bool _pushEnabled = true;
   int _notifRadius = 25;
   bool _notifNewJobs = true;
   bool _notifJobUpdates = true;
   bool _notifPayments = true;
   bool _notifSystem = false;
+  bool _notifApp = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _vm = context.read<MechanicViewModel>();
+    _vmListen = () {
+      final profile = _vm.meProfile;
+      if (_vm.meProfileLoading || profile == null) return;
+      if (identical(_syncedFromProfile, profile)) return;
+      _syncedFromProfile = profile;
+      setState(() {
+        _pushEnabled = profile.pushEnabled;
+        _notifRadius = profile.alertRadiusMiles;
+        _notifNewJobs = profile.notifNewBreakdownJobs;
+        _notifJobUpdates = profile.notifJobAcceptedDeclined;
+        _notifPayments = profile.notifPaymentReceived;
+        final sysApp = profile.notifSystemAlerts || profile.notifAppAlerts;
+        _notifSystem = sysApp;
+        _notifApp = sysApp;
+      });
+    };
+    _vm.addListener(_vmListen);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _vmListen());
+  }
+
+  @override
+  void dispose() {
+    _vm.removeListener(_vmListen);
+    super.dispose();
+  }
+
+  Future<void> _persistNotificationSettings() async {
+    final vm = context.read<MechanicViewModel>();
+    try {
+      await vm.patchMechanicNotificationSettings(
+        pushEnabled: _pushEnabled,
+        alertRadiusMiles: _notifRadius,
+        newBreakdownJobs: _notifNewJobs,
+        jobAcceptedDeclined: _notifJobUpdates,
+        paymentReceived: _notifPayments,
+        systemAlerts: _notifSystem,
+        appAlerts: _notifApp,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      await vm.loadMeProfile();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final vm = context.watch<MechanicViewModel>();
+    final p = vm.meProfile;
+    final loading = vm.meProfileLoading;
+    final err = vm.meProfileError;
+
     const radii = [5, 10, 25, 50];
+
+    final avatarUrl = () {
+      final u = p?.profilePhotoUrl?.trim();
+      if (u != null && u.isNotEmpty) return u;
+      return AppAssets.mechanicPortrait;
+    }();
+
+    final displayName = p?.displayName ?? (loading ? '…' : 'Mechanic');
+    final ratingLabel = p != null ? p.avgRating.toStringAsFixed(1) : (loading ? '…' : '—');
+    final avgForStars = p?.avgRating ?? 0;
+    final jobsDoneLabel = p != null ? '${p.jobsDone}' : (loading ? '…' : '—');
+    final responseLabel =
+        (p != null && p.responseMinutes > 0) ? '${p.responseMinutes} min' : (loading ? '…' : '—');
+
+    final hourlyLine = p != null ? '${p.formatMoney(p.hourlyRate)} / hr' : (loading ? '…' : '—');
+    final emergencyLine =
+        loading && p == null ? '…' : (p != null && p.emergencyRate != null ? '${p.formatMoney(p.emergencyRate)} / hr' : '—');
+    final callOutLine = p != null ? p.formatMoney(p.callOutFee) : (loading ? '…' : '—');
+    final serviceRadius = p?.serviceRadiusMiles;
+    final radiusLine = serviceRadius != null ? '$serviceRadius mi' : (loading ? '…' : '—');
+    final baseLine = loading && p == null ? '…' : (p != null ? p.baseLocationLine : '—');
+
+    final bankLabel = p?.bankDisplayName ?? (loading ? '…' : '—');
+    final accountMasked = p?.bankAccountMasked ?? (loading ? '…' : '—');
+    final sortCodeLabel = p?.bankSortCode ?? (loading ? '…' : '—');
+    final billingAddr = p?.billingAddress ?? (loading ? '…' : '—');
+    final vatNum = p?.vatNumber ?? (loading ? '…' : '—');
+    final vatReg = p?.vatRegistered == true;
+
+    final alertFootnoteBase = loading && p == null ? 'your base location' : (p?.baseLocationLine ?? 'your base location');
 
     Widget stat(String value, String label) {
       return Container(
@@ -5322,12 +6566,13 @@ class _MechanicProfileState extends State<_MechanicProfile> {
       required String label,
       required bool on,
       required VoidCallback onToggle,
+      bool locked = false,
     }) {
       return Material(
         color: AppColors.card2,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
-          onTap: onToggle,
+          onTap: locked ? null : onToggle,
           borderRadius: BorderRadius.circular(14),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -5416,9 +6661,31 @@ class _MechanicProfileState extends State<_MechanicProfile> {
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      children: [
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: vm.loadMeProfile,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        children: [
+          if (err != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Material(
+                color: AppColors.red.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(14),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(err, style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35)),
+                      TextButton(onPressed: loading ? null : vm.loadMeProfile, child: const Text('Retry')),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         // Hero
         Column(
           children: [
@@ -5428,10 +6695,17 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(18),
                   child: CachedNetworkImage(
-                    imageUrl: AppAssets.mechanicPortrait,
+                    imageUrl: avatarUrl,
                     width: 80,
                     height: 80,
                     fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => Container(
+                      width: 80,
+                      height: 80,
+                      color: AppColors.card2,
+                      alignment: Alignment.center,
+                      child: Icon(Icons.person_rounded, size: 40, color: AppColors.textMuted.withValues(alpha: 0.85)),
+                    ),
                   ),
                 ),
                 Positioned(
@@ -5453,18 +6727,25 @@ class _MechanicProfileState extends State<_MechanicProfile> {
               ],
             ),
             const SizedBox(height: 10),
-            const Text('Themba Dlamini', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18)),
+            Text(displayName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18)),
             const SizedBox(height: 6),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 for (int i = 0; i < 5; i++)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 3),
-                    child: Icon(Icons.star, size: 16, color: AppColors.primary),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 3),
+                    child: Icon(
+                      Icons.star,
+                      size: 16,
+                      color: i < avgForStars.floor().clamp(0, 5) ? AppColors.primary : AppColors.textMuted.withValues(alpha: 0.35),
+                    ),
                   ),
                 const SizedBox(width: 4),
-                const Text('4.9', style: TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+                Text(
+                  ratingLabel,
+                  style: const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
               ],
             ),
           ],
@@ -5472,11 +6753,11 @@ class _MechanicProfileState extends State<_MechanicProfile> {
         const SizedBox(height: 14),
         Row(
           children: [
-            Expanded(child: stat('184', 'Jobs Done')),
+            Expanded(child: stat(jobsDoneLabel, 'Jobs Done')),
             const SizedBox(width: 10),
-            Expanded(child: stat('4.9', 'Avg Rating')),
+            Expanded(child: stat(ratingLabel, 'Avg Rating')),
             const SizedBox(width: 10),
-            Expanded(child: stat('6 min', 'Response')),
+            Expanded(child: stat(responseLabel, 'Response')),
           ],
         ),
         const SizedBox(height: 12),
@@ -5493,6 +6774,13 @@ class _MechanicProfileState extends State<_MechanicProfile> {
             icon: const Icon(Icons.edit_outlined, size: 18),
             label: const Text('Edit Profile', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 0.6)),
           ),
+        ),
+        const SizedBox(height: 12),
+        profileShortcut(
+          icon: Icons.chat_bubble_outline_rounded,
+          title: 'Messages',
+          subtitle: 'Chats with fleets, operators & TruckFix support',
+          onTap: () => vm.setTab('profile-messages'),
         ),
         const SizedBox(height: 14),
 
@@ -5518,15 +6806,15 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                 padding: const EdgeInsets.all(14),
                 child: Column(
                   children: [
-                    kv('Hourly Rate', '£75 / hr'),
+                    kv('Hourly Rate', hourlyLine),
                     const SizedBox(height: 10),
-                    kv('Emergency Rate', '£95 / hr'),
+                    kv('Emergency Rate', emergencyLine),
                     const SizedBox(height: 10),
-                    kv('Call-out Fee', '£35'),
+                    kv('Call-out Fee', callOutLine),
                     const SizedBox(height: 10),
-                    kv('Service Radius', '50 mi'),
+                    kv('Service Radius', radiusLine),
                     const SizedBox(height: 10),
-                    kv('Base Location', 'Manchester, M1'),
+                    kv('Base Location', baseLine),
                   ],
                 ),
               ),
@@ -5561,12 +6849,12 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                       width: 38,
                       height: 38,
                       decoration: BoxDecoration(
-                        color: _notifEnabled ? AppColors.primary.withValues(alpha: 0.15) : AppColors.border,
+                        color: _pushEnabled ? AppColors.primary.withValues(alpha: 0.15) : AppColors.border,
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: Icon(
                         Icons.notifications_none_rounded,
-                        color: _notifEnabled ? AppColors.primary : AppColors.textMuted,
+                        color: _pushEnabled ? AppColors.primary : AppColors.textMuted,
                         size: 18,
                       ),
                     ),
@@ -5577,22 +6865,27 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                         children: [
                           const Text('Enable Notifications', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
                           Text(
-                            _notifEnabled ? 'You are receiving job alerts' : 'Tap to turn on job alerts',
+                            _pushEnabled ? 'You are receiving job alerts' : 'Tap to turn on job alerts',
                             style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10),
                           ),
                         ],
                       ),
                     ),
                     Switch(
-                      value: _notifEnabled,
-                      onChanged: (v) => setState(() => _notifEnabled = v),
+                      value: _pushEnabled,
+                      onChanged: vm.meProfilePatchBusy
+                          ? null
+                          : (v) {
+                              setState(() => _pushEnabled = v);
+                              _persistNotificationSettings();
+                            },
                       activeTrackColor: AppColors.primary,
                       activeThumbColor: Colors.white,
                     ),
                   ],
                 ),
               ),
-              if (_notifEnabled) ...[
+              if (_pushEnabled) ...[
                 const Divider(height: 1, color: AppColors.border),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
@@ -5613,7 +6906,12 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                           for (int i = 0; i < radii.length; i++) ...[
                             Expanded(
                               child: OutlinedButton(
-                                onPressed: () => setState(() => _notifRadius = radii[i]),
+                                onPressed: vm.meProfilePatchBusy
+                                    ? null
+                                    : () {
+                                        setState(() => _notifRadius = radii[i]);
+                                        _persistNotificationSettings();
+                                      },
                                 style: OutlinedButton.styleFrom(
                                   side: BorderSide(color: _notifRadius == radii[i] ? AppColors.primary : AppColors.border2),
                                   backgroundColor: _notifRadius == radii[i] ? AppColors.primary : AppColors.card2,
@@ -5633,7 +6931,7 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "You'll be notified of breakdown jobs within $_notifRadius mi of Manchester M1",
+                        "You'll be notified of breakdown jobs within $_notifRadius mi of $alertFootnoteBase",
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
                       ),
                       const SizedBox(height: 14),
@@ -5646,28 +6944,48 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                         icon: Icons.work_outline,
                         label: 'New breakdown jobs near me',
                         on: _notifNewJobs,
-                        onToggle: () => setState(() => _notifNewJobs = !_notifNewJobs),
+                        locked: vm.meProfilePatchBusy,
+                        onToggle: () {
+                          setState(() => _notifNewJobs = !_notifNewJobs);
+                          _persistNotificationSettings();
+                        },
                       ),
                       const SizedBox(height: 6),
                       notifTypeRow(
                         icon: Icons.check_circle_outline,
                         label: 'Job accepted / declined',
                         on: _notifJobUpdates,
-                        onToggle: () => setState(() => _notifJobUpdates = !_notifJobUpdates),
+                        locked: vm.meProfilePatchBusy,
+                        onToggle: () {
+                          setState(() => _notifJobUpdates = !_notifJobUpdates);
+                          _persistNotificationSettings();
+                        },
                       ),
                       const SizedBox(height: 6),
                       notifTypeRow(
                         icon: Icons.payments_outlined,
                         label: 'Payment received',
                         on: _notifPayments,
-                        onToggle: () => setState(() => _notifPayments = !_notifPayments),
+                        locked: vm.meProfilePatchBusy,
+                        onToggle: () {
+                          setState(() => _notifPayments = !_notifPayments);
+                          _persistNotificationSettings();
+                        },
                       ),
                       const SizedBox(height: 6),
                       notifTypeRow(
                         icon: Icons.shield_outlined,
                         label: 'System & app alerts',
                         on: _notifSystem,
-                        onToggle: () => setState(() => _notifSystem = !_notifSystem),
+                        locked: vm.meProfilePatchBusy,
+                        onToggle: () {
+                          setState(() {
+                            final next = !_notifSystem;
+                            _notifSystem = next;
+                            _notifApp = next;
+                          });
+                          _persistNotificationSettings();
+                        },
                       ),
                     ],
                   ),
@@ -5700,11 +7018,11 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                 padding: const EdgeInsets.all(14),
                 child: Column(
                   children: [
-                    kv('Bank', 'Barclays'),
+                    kv('Bank', bankLabel),
                     const SizedBox(height: 10),
-                    kv('Account', '•••• •••• 4521'),
+                    kv('Account', accountMasked),
                     const SizedBox(height: 10),
-                    kv('Sort Code', '20-14-55'),
+                    kv('Sort Code', sortCodeLabel),
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 10),
                       child: Divider(height: 1, color: Color(0xFF1E1E1E)),
@@ -5714,17 +7032,17 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                       children: [
                         const Text('Billing Address', style: TextStyle(color: Color(0xFF6B7280), fontSize: 12)),
                         const SizedBox(width: 12),
-                        const Expanded(
+                        Expanded(
                           child: Text(
-                            '14 Workshop Lane, Manchester M1 2AB',
+                            billingAddr,
                             textAlign: TextAlign.right,
-                            style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600, height: 1.35),
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600, height: 1.35),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 10),
-                    kv('VAT Number', 'GB 345 7821 00'),
+                    kv('VAT Number', vatNum),
                     const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -5733,13 +7051,19 @@ class _MechanicProfileState extends State<_MechanicProfile> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: AppColors.green.withValues(alpha: 0.10),
+                            color: vatReg ? AppColors.green.withValues(alpha: 0.10) : AppColors.textMuted.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: AppColors.green.withValues(alpha: 0.20)),
+                            border: Border.all(
+                              color: vatReg ? AppColors.green.withValues(alpha: 0.20) : AppColors.border2,
+                            ),
                           ),
-                          child: const Text(
-                            'YES',
-                            style: TextStyle(color: AppColors.green, fontSize: 10, fontWeight: FontWeight.w900),
+                          child: Text(
+                            vatReg ? 'YES' : 'NO',
+                            style: TextStyle(
+                              color: vatReg ? AppColors.green : AppColors.textMuted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
                         ),
                       ],
@@ -5761,7 +7085,11 @@ class _MechanicProfileState extends State<_MechanicProfile> {
         profileShortcut(
           icon: Icons.credit_card,
           title: 'Payment Methods',
-          subtitle: 'Manage cards for expenses & receipts',
+          subtitle: (() {
+            final card = p?.paymentCardLabel?.trim();
+            if (card != null && card.isNotEmpty) return card;
+            return 'Manage cards for expenses & receipts';
+          })(),
           onTap: widget.onPayment,
         ),
         const SizedBox(height: 10),
@@ -5784,6 +7112,7 @@ class _MechanicProfileState extends State<_MechanicProfile> {
           label: const Text('Log Out', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
         ),
       ],
+    ),
     );
   }
 }

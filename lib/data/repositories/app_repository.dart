@@ -1,6 +1,7 @@
 import '../models/fleet_job_summary.dart';
 import '../models/job_offer.dart';
 import '../models/mechanic_quote.dart';
+import '../models/forgot_password_result.dart';
 import '../models/session.dart';
 import '../models/team_member.dart';
 import '../models/vehicle.dart';
@@ -19,8 +20,11 @@ abstract class AuthRepository {
     required UserRole roleHint,
   });
 
-  /// Optional backend logout (best-effort).
-  Future<void> logout({required String refreshToken});
+  /// Optional backend logout (best-effort). Send [accessToken] as `Authorization: Bearer` when present.
+  Future<void> logout({String? accessToken, String? refreshToken});
+
+  /// `POST /api/v1/auth/forgot-password` — sends reset instructions to [email].
+  Future<ForgotPasswordResult> forgotPassword({required String email});
 
   /// Fleet operator registration.
   Future<void> registerFleetOperator({
@@ -51,7 +55,21 @@ abstract class AuthRepository {
     String? rateCurrency,
     num? coverageRadius,
     String? profilePhotoUrl,
+    String? profilePhotoPath,
     List<String>? skills,
+  });
+
+  /// Company mechanic employee (invite) — `POST /api/v1/auth/register` with `role: MECHANIC_EMPLOYEE`.
+  Future<void> registerMechanicEmployee({
+    required String email,
+    required String password,
+    required String confirmPassword,
+    required String inviteToken,
+    required String fullName,
+    required String phone,
+    required String displayName,
+    required String baseLocationText,
+    required List<String> skills,
   });
 }
 
@@ -84,8 +102,15 @@ class MemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> logout({required String refreshToken}) async {
+  Future<void> logout({String? accessToken, String? refreshToken}) async {
     await clearSession();
+  }
+
+  @override
+  Future<ForgotPasswordResult> forgotPassword({required String email}) async {
+    return ForgotPasswordResult(
+      message: 'If an account exists for this email, password reset instructions have been sent.',
+    );
   }
 
   @override
@@ -119,7 +144,23 @@ class MemoryAuthRepository implements AuthRepository {
     String? rateCurrency,
     num? coverageRadius,
     String? profilePhotoUrl,
+    String? profilePhotoPath,
     List<String>? skills,
+  }) async {
+    // No-op for prototype mode.
+  }
+
+  @override
+  Future<void> registerMechanicEmployee({
+    required String email,
+    required String password,
+    required String confirmPassword,
+    required String inviteToken,
+    required String fullName,
+    required String phone,
+    required String displayName,
+    required String baseLocationText,
+    required List<String> skills,
   }) async {
     // No-op for prototype mode.
   }
@@ -187,6 +228,8 @@ class MemoryJobRepository implements JobRepository {
           type: 'Tautliner',
           categoryBadge: 'TAUTLINER',
           lastService: '15 Jan 2025',
+          photoUrl: AppAssets.fleetVehicleThumb1,
+          photoUrlSecondary: AppAssets.fleetVehicleSecondary1,
         ),
         Vehicle(
           id: 'fv2',
@@ -195,6 +238,8 @@ class MemoryJobRepository implements JobRepository {
           type: 'Rigid',
           categoryBadge: 'RIGID 8T',
           lastService: '3 Feb 2025',
+          photoUrl: AppAssets.fleetVehicleThumb2,
+          photoUrlSecondary: AppAssets.fleetVehicleSecondary2,
         ),
         Vehicle(
           id: 'fv3',
@@ -203,6 +248,8 @@ class MemoryJobRepository implements JobRepository {
           type: 'Tanker',
           categoryBadge: 'TANKER',
           lastService: '28 Dec 2024',
+          photoUrl: AppAssets.fleetVehicleThumb3,
+          photoUrlSecondary: AppAssets.fleetVehicleSecondary3,
         ),
       ];
 

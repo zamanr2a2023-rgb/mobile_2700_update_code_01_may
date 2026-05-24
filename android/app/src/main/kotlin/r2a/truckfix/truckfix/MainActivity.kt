@@ -1,4 +1,4 @@
-package com.truckfix.truckfix
+package r2a.truckfix.truckfix
 
 import io.flutter.embedding.android.FlutterActivity
 

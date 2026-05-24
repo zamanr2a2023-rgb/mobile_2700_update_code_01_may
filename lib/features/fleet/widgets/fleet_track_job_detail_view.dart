@@ -126,8 +126,12 @@ class FleetTrackJobDetailView extends StatefulWidget {
 
 class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with SingleTickerProviderStateMixin {
   bool _cancelOpen = false;
+  bool _cancelSubmitting = false;
+  String? _cancelErr;
   bool _contactOpen = false;
   bool _ratingOpen = false;
+  bool _ratingSubmitting = false;
+  String? _ratingErr;
   int _ratingValue = 0;
   final _ratingComment = TextEditingController();
   bool _ratingSubmitted = false;
@@ -149,8 +153,11 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
   Widget _cancelSheet(FleetTrackJobDetailUi d) {
     final fee = _cancelHasFee(d);
     final feeStr = _cancelFeeStr(d);
+    final vm = context.read<FleetViewModel>();
     return _DetailBottomOverlay(
-      onBarrierTap: () => setState(() => _cancelOpen = false),
+      onBarrierTap: () {
+        if (!_cancelSubmitting) setState(() => _cancelOpen = false);
+      },
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -215,24 +222,70 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                 ),
               ),
             ],
+            if (_cancelErr != null && _cancelErr!.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                _cancelErr!,
+                style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35),
+              ),
+            ],
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: () => setState(() => _cancelOpen = false),
+              onPressed: !_cancelSubmitting
+                  ? () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      final bid = d.backendId.trim();
+                      if (bid.isEmpty) {
+                        messenger.showSnackBar(const SnackBar(content: Text('This job cannot be cancelled (no server id).')));
+                        setState(() => _cancelOpen = false);
+                        return;
+                      }
+                      setState(() {
+                        _cancelSubmitting = true;
+                        _cancelErr = null;
+                      });
+                      try {
+                        await vm.cancelFleetJob(bid);
+                        if (!mounted) return;
+                        setState(() {
+                          _cancelOpen = false;
+                          _cancelSubmitting = false;
+                        });
+                        vm.closeTrackingJobDetail();
+                        await vm.refresh();
+                        messenger.showSnackBar(const SnackBar(content: Text('Job cancelled')));
+                      } catch (e) {
+                        if (!mounted) return;
+                        setState(() {
+                          _cancelSubmitting = false;
+                          _cancelErr = e.toString();
+                        });
+                      }
+                    }
+                  : null,
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.red,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.red.withValues(alpha: 0.45),
+                disabledForegroundColor: Colors.white.withValues(alpha: 0.75),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: Text(
-                fee ? 'Confirm Cancellation ($feeStr fee)' : 'Confirm Cancellation — Free',
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
-                textAlign: TextAlign.center,
-              ),
+              child: _cancelSubmitting
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                    )
+                  : Text(
+                      fee ? 'Confirm Cancellation ($feeStr fee)' : 'Confirm Cancellation — Free',
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
             ),
             const SizedBox(height: 10),
             OutlinedButton(
-              onPressed: () => setState(() => _cancelOpen = false),
+              onPressed: _cancelSubmitting ? null : () => setState(() => _cancelOpen = false),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textSecondary,
                 side: const BorderSide(color: AppColors.border2),
@@ -317,9 +370,13 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                       FleetChatSession(
                         mechanicName: d.mechanicName,
                         mechanicPhone: phone.isEmpty ? null : phone,
-                        mechanicPhotoUrl: AppAssets.mechanicPortrait,
+                        mechanicPhotoUrl: () {
+                          final u = d.mechanicProfilePhotoUrl?.trim();
+                          return (u != null && u.isNotEmpty) ? u : AppAssets.mechanicPortrait;
+                        }(),
                         jobCode: d.jobCode,
                         truckLine: d.subtitle,
+                        jobId: d.backendId.trim().isEmpty ? null : d.backendId.trim(),
                       ),
                     );
               },
@@ -345,8 +402,11 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
   }
 
   Widget _ratingSheet(FleetTrackJobDetailUi d) {
+    final vm = context.read<FleetViewModel>();
     return _DetailBottomOverlay(
-      onBarrierTap: _ratingSubmitted ? null : () => setState(() => _ratingOpen = false),
+      onBarrierTap: (_ratingSubmitting || _ratingSubmitted)
+          ? null
+          : () => setState(() => _ratingOpen = false),
       align: Alignment.bottomCenter,
       child: Container(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -384,6 +444,17 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                       'Thanks for rating ${d.mechanicName}. Your feedback helps keep the network reliable.',
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: () => setState(() => _ratingOpen = false),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('DONE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
                     ),
                   ],
                 )
@@ -423,7 +494,7 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                         return Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 6),
                           child: InkWell(
-                            onTap: () => setState(() => _ratingValue = n),
+                            onTap: _ratingSubmitting ? null : () => setState(() => _ratingValue = n),
                             child: Icon(Icons.star_rounded, size: 36, color: on ? AppColors.primary : const Color(0xFF2A2A2A)),
                           ),
                         );
@@ -452,6 +523,7 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                     TextField(
                       controller: _ratingComment,
                       maxLines: 3,
+                      enabled: !_ratingSubmitting,
                       style: const TextStyle(color: Colors.white, fontSize: 12),
                       decoration: InputDecoration(
                         hintText: 'Punctuality, quality of repair, professionalism...',
@@ -467,14 +539,48 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                         contentPadding: const EdgeInsets.all(14),
                       ),
                     ),
+                    if (_ratingErr != null && _ratingErr!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _ratingErr!,
+                        style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: _ratingValue == 0
+                      onPressed: (_ratingValue == 0 || _ratingSubmitting)
                           ? null
                           : () async {
-                              setState(() => _ratingSubmitted = true);
-                              await Future<void>.delayed(const Duration(milliseconds: 1800));
-                              if (mounted) setState(() => _ratingOpen = false);
+                              final messenger = ScaffoldMessenger.of(context);
+                              final bid = d.backendId.trim();
+                              if (bid.isEmpty) {
+                                messenger.showSnackBar(const SnackBar(content: Text('Cannot submit review (no server job id).')));
+                                return;
+                              }
+                              setState(() {
+                                _ratingSubmitting = true;
+                                _ratingErr = null;
+                              });
+                              try {
+                                final c = _ratingComment.text.trim();
+                                await vm.submitFleetJobReview(
+                                  backendJobId: bid,
+                                  rating: _ratingValue,
+                                  comment: c.isEmpty ? null : c,
+                                );
+                                if (!mounted) return;
+                                setState(() {
+                                  _ratingSubmitting = false;
+                                  _ratingSubmitted = true;
+                                });
+                                await vm.loadTrackingJobDetail();
+                              } catch (e) {
+                                if (!mounted) return;
+                                setState(() {
+                                  _ratingSubmitting = false;
+                                  _ratingErr = e.toString();
+                                });
+                              }
                             },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
@@ -484,17 +590,23 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.star_rounded, size: 18),
-                          SizedBox(width: 8),
-                          Text('SUBMIT REVIEW', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.2)),
-                        ],
-                      ),
+                      child: _ratingSubmitting
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.black54),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.star_rounded, size: 18),
+                                SizedBox(width: 8),
+                                Text('SUBMIT REVIEW', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 1.2)),
+                              ],
+                            ),
                     ),
                     TextButton(
-                      onPressed: () => setState(() => _ratingOpen = false),
+                      onPressed: _ratingSubmitting ? null : () => setState(() => _ratingOpen = false),
                       child: const Text('Not now', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
                     ),
                   ],
@@ -801,11 +913,21 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
-                                  child: CachedNetworkImage(
-                                    imageUrl: AppAssets.mechanicPortrait,
+                                  child: SizedBox(
                                     width: 48,
                                     height: 48,
-                                    fit: BoxFit.cover,
+                                    child: CachedNetworkImage(
+                                      imageUrl: (d.mechanicProfilePhotoUrl != null &&
+                                              d.mechanicProfilePhotoUrl!.trim().isNotEmpty)
+                                          ? d.mechanicProfilePhotoUrl!.trim()
+                                          : AppAssets.mechanicPortrait,
+                                      fit: BoxFit.cover,
+                                      placeholder: (_, __) => Container(color: AppColors.card2),
+                                      errorWidget: (_, __, ___) => CachedNetworkImage(
+                                        imageUrl: AppAssets.mechanicPortrait,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 12),
@@ -1051,6 +1173,8 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                           _ratingSubmitted = false;
                           _ratingValue = 0;
                           _ratingComment.clear();
+                          _ratingSubmitting = false;
+                          _ratingErr = null;
                         }),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.primary,
@@ -1091,7 +1215,11 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                     if (d.paymentStatusKey != 'released' && d.cancellationCanCancel) ...[
                       const SizedBox(height: 10),
                       OutlinedButton(
-                        onPressed: () => setState(() => _cancelOpen = true),
+                        onPressed: () => setState(() {
+                          _cancelOpen = true;
+                          _cancelErr = null;
+                          _cancelSubmitting = false;
+                        }),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.red,
                           side: BorderSide(color: AppColors.red.withValues(alpha: 0.30)),

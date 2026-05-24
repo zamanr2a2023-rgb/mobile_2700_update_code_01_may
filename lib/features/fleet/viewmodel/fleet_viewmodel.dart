@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../../data/models/fleet_billing_payment_method.dart';
 import '../../../data/models/fleet_job_quote.dart';
 import '../../../data/models/fleet_job_summary.dart';
 import '../../../data/models/fleet_me_profile.dart';
 import '../../../data/models/fleet_track_job_detail.dart';
+import '../../../data/models/fleet_vehicle_detail.dart';
+import '../../../data/models/job_chat_models.dart';
 import '../../../data/models/vehicle.dart';
-import '../../../data/repositories/app_repository.dart';
+import '../../../data/services/chat_api_service.dart';
 import '../../../data/services/fleet_api_service.dart';
 import '../../../data/services/users_api_service.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
@@ -82,19 +85,20 @@ class FleetTrackingJobUi {
 
 class FleetViewModel extends ChangeNotifier {
   FleetViewModel(
-    this._jobs,
     this._auth, {
     FleetApiService? api,
     UsersApiService? usersApi,
+    ChatApiService? chatApi,
   })  : _api = api ?? FleetApiService(),
-        _usersApi = usersApi ?? UsersApiService() {
+        _usersApi = usersApi ?? UsersApiService(),
+        _chat = chatApi ?? ChatApiService() {
     refresh();
   }
 
-  final JobRepository _jobs;
   final AuthViewModel _auth;
   final FleetApiService _api;
   final UsersApiService _usersApi;
+  final ChatApiService _chat;
 
   String tab = 'dashboard';
   bool profileComplete = false;
@@ -109,7 +113,25 @@ class FleetViewModel extends ChangeNotifier {
   FleetChatSession? chatSession;
   bool showNotifications = false;
 
-  List<Vehicle> get vehicles => _jobs.fleetVehicles();
+  /// Profile → Messages (`GET /api/v1/chat/threads`), same inbox as mechanic.
+  List<ChatInboxThreadRow> fleetInboxThreads = [];
+  bool fleetInboxLoading = false;
+  String? fleetInboxError;
+  ChatInboxThreadRow? activeFleetInboxChat;
+
+  String threadTimeLabel(ChatInboxThreadRow row) => formatChatThreadTime(row.sortTimeIso);
+
+  /// `GET /api/v1/fleet/vehicles` for Profile → My Fleet.
+  List<Vehicle> fleetVehicles = const [];
+  bool fleetVehiclesLoading = false;
+  String? fleetVehiclesError;
+
+  /// `GET /api/v1/fleet/vehicles/:id` while Profile → vehicle detail is open.
+  FleetVehicleDetailPayload? vehicleDetailPayload;
+  bool vehicleDetailLoading = false;
+  String? vehicleDetailError;
+
+  List<Vehicle> get vehicles => fleetVehicles;
 
   bool loading = false;
   String? loadError;
@@ -137,6 +159,11 @@ class FleetViewModel extends ChangeNotifier {
   FleetMeProfileUi? meProfile;
   bool meProfileLoading = false;
   String? meProfileError;
+
+  /// `GET /api/v1/billing/payment-methods`
+  List<FleetBillingPaymentMethod> billingPaymentMethods = const [];
+  bool billingPaymentMethodsLoading = false;
+  String? billingPaymentMethodsError;
 
   /// Quotes for the dashboard job sheet (`GET .../jobs/:id/quotes`).
   List<FleetJobQuote> jobQuotes = const [];
@@ -195,6 +222,154 @@ class FleetViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// `GET /api/v1/fleet/vehicles` — My Fleet list.
+  ///
+  /// [silent]: refresh without clearing the list or showing the overlay loading
+  /// spinner (e.g. after add vehicle).
+  Future<void> loadFleetVehicles({bool silent = false}) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      if (!silent) {
+        fleetVehiclesError = 'Not signed in';
+        fleetVehicles = const [];
+      }
+      fleetVehiclesLoading = false;
+      notifyListeners();
+      return;
+    }
+    if (!silent) {
+      fleetVehiclesLoading = true;
+      fleetVehiclesError = null;
+      notifyListeners();
+    } else {
+      fleetVehiclesError = null;
+    }
+    try {
+      final res = await _api.fetchFleetVehicles(accessToken: token);
+      fleetVehicles = Vehicle.listFromFleetApiData(res['data']);
+      fleetVehiclesError = null;
+    } catch (e) {
+      fleetVehiclesError = e.toString();
+      if (!silent) {
+        fleetVehicles = const [];
+      }
+    } finally {
+      if (!silent) {
+        fleetVehiclesLoading = false;
+      }
+      notifyListeners();
+    }
+  }
+
+  /// `GET /api/v1/fleet/vehicles/:id` (vehicle + recent jobs).
+  Future<void> loadFleetVehicleDetail(String vehicleId) async {
+    final id = vehicleId.trim();
+    if (id.isEmpty) return;
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      vehicleDetailError = 'Not signed in';
+      vehicleDetailPayload = null;
+      vehicleDetailLoading = false;
+      notifyListeners();
+      return;
+    }
+    vehicleDetailLoading = true;
+    vehicleDetailError = null;
+    notifyListeners();
+    try {
+      final res = await _api.fetchFleetVehicleById(accessToken: token, vehicleId: id);
+      final parsed = FleetVehicleDetailPayload.tryParse(res);
+      if (parsed == null) {
+        vehicleDetailPayload = null;
+        vehicleDetailError = 'Invalid vehicle response';
+      } else {
+        vehicleDetailPayload = parsed;
+        vehicleDetailError = null;
+        if (selectedVehicle?.id == parsed.vehicle.id) {
+          selectedVehicle = parsed.vehicle;
+        }
+      }
+    } catch (e) {
+      vehicleDetailError = e.toString();
+      vehicleDetailPayload = null;
+    } finally {
+      vehicleDetailLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// `POST /api/v1/fleet/vehicles`. Returns `null` on success.
+  Future<String?> addFleetVehicle({
+    required String registration,
+    required String type,
+    required String make,
+    required String model,
+    String? vin,
+    int? currentMileageKm,
+  }) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      return 'Not signed in';
+    }
+    try {
+      await _api.createFleetVehicle(
+        accessToken: token,
+        registration: registration,
+        type: type,
+        make: make,
+        model: model,
+        vin: vin,
+        currentMileageKm: currentMileageKm,
+      );
+      await loadFleetVehicles(silent: true);
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
+  /// `PATCH /api/v1/fleet/vehicles/:id`
+  Future<String?> updateFleetVehicle({
+    required Vehicle vehicle,
+    required String registration,
+    required String make,
+    required String model,
+  }) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      return 'Not signed in';
+    }
+    final vid = vehicle.id.trim();
+    if (vid.isEmpty) {
+      return 'Invalid vehicle';
+    }
+    try {
+      await _api.patchFleetVehicle(
+        accessToken: token,
+        vehicleId: vid,
+        registration: registration,
+        make: make,
+        model: model,
+        type: vehicle.type,
+        year: vehicle.year,
+        vin: vehicle.vin,
+      );
+      await loadFleetVehicles(silent: true);
+      final match = fleetVehicles.where((v) => v.id == vid).toList();
+      if (match.isNotEmpty) {
+        selectedVehicle = match.first;
+      }
+      if (tab == 'vehicle-detail' && selectedVehicle?.id == vid) {
+        await loadFleetVehicleDetail(vid);
+      } else {
+        notifyListeners();
+      }
+      return null;
+    } catch (e) {
+      return e.toString();
+    }
+  }
+
   /// `PATCH /api/v1/jobs/:jobId/complete/approve`
   Future<void> approveJobCompletion(String backendJobId) async {
     final token = _auth.session?.accessToken;
@@ -206,6 +381,31 @@ class FleetViewModel extends ChangeNotifier {
       throw Exception('Invalid job');
     }
     await _api.approveJobCompletion(accessToken: token, jobId: id);
+  }
+
+  /// `POST /api/v1/fleet/reviews`
+  Future<void> submitFleetJobReview({
+    required String backendJobId,
+    required int rating,
+    String? comment,
+  }) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      throw Exception('Not signed in');
+    }
+    final id = backendJobId.trim();
+    if (id.isEmpty) {
+      throw Exception('Invalid job');
+    }
+    if (rating < 1 || rating > 5) {
+      throw Exception('Please choose a rating from 1 to 5 stars');
+    }
+    await _api.submitFleetReview(
+      accessToken: token,
+      jobId: id,
+      rating: rating,
+      comment: comment,
+    );
   }
 
   /// `PATCH /api/v1/jobs/:jobId/cancel`
@@ -232,6 +432,82 @@ class FleetViewModel extends ChangeNotifier {
       throw Exception('Invalid quote');
     }
     await _api.acceptQuote(accessToken: token, quoteId: id);
+  }
+
+  /// `GET /api/v1/billing/payment-methods` (optionally refresh without clearing the overlay).
+  Future<void> loadBillingPaymentMethods({bool silent = false}) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      billingPaymentMethodsError = 'Not signed in';
+      billingPaymentMethods = const [];
+      notifyListeners();
+      return;
+    }
+    if (!silent) {
+      billingPaymentMethodsLoading = true;
+      billingPaymentMethodsError = null;
+      notifyListeners();
+    }
+    try {
+      final body = await _api.fetchBillingPaymentMethods(accessToken: token);
+      final raw = body['data'];
+      final list = raw is List ? raw : const [];
+      billingPaymentMethods = list
+          .whereType<Map>()
+          .map((m) => FleetBillingPaymentMethod.maybeFromJson(m.cast<String, dynamic>()))
+          .whereType<FleetBillingPaymentMethod>()
+          .where((p) => p.isActive)
+          .toList(growable: false);
+      billingPaymentMethodsError = null;
+    } catch (e) {
+      if (!silent) {
+        billingPaymentMethodsError = e.toString();
+        billingPaymentMethods = const [];
+      } else {
+        billingPaymentMethodsError = e.toString();
+      }
+    } finally {
+      if (!silent) {
+        billingPaymentMethodsLoading = false;
+      }
+      notifyListeners();
+    }
+  }
+
+  /// `PATCH /api/v1/billing/payment-methods/:id/default`
+  Future<void> setDefaultBillingPaymentMethod(String paymentMethodId) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      throw Exception('Not signed in');
+    }
+    final id = paymentMethodId.trim();
+    if (id.isEmpty) {
+      throw Exception('Invalid payment method');
+    }
+    await _api.setBillingPaymentMethodDefault(accessToken: token, methodId: id);
+    billingPaymentMethodsError = null;
+    await loadBillingPaymentMethods(silent: true);
+    if (billingPaymentMethodsError != null && billingPaymentMethodsError!.trim().isNotEmpty) {
+      throw Exception(billingPaymentMethodsError);
+    }
+  }
+
+  /// `DELETE /api/v1/billing/payment-methods/:id`
+  Future<void> deleteBillingPaymentMethod(String paymentMethodId) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      throw Exception('Not signed in');
+    }
+    final id = paymentMethodId.trim();
+    if (id.isEmpty) {
+      throw Exception('Invalid payment method');
+    }
+    await _api.deleteBillingPaymentMethod(accessToken: token, methodId: id);
+    billingPaymentMethodsError = null;
+    await loadBillingPaymentMethods(silent: true);
+    if (billingPaymentMethodsError != null && billingPaymentMethodsError!.trim().isNotEmpty) {
+      throw Exception(billingPaymentMethodsError);
+    }
   }
 
   Future<void> loadMeProfile() async {
@@ -381,6 +657,8 @@ class FleetViewModel extends ChangeNotifier {
       completedJobs = _parseCompletedJobs(completedRes['data']);
       trackingJobs = _parseTrackingJobs(trackingRes['data']);
       hasLoadedOnce = true;
+
+      await loadFleetVehicles(silent: true);
     } catch (e) {
       loadError = e.toString();
     } finally {
@@ -555,6 +833,18 @@ class FleetViewModel extends ChangeNotifier {
     final urgencyCfg = _urgencyColors(urgency);
     final statusCfg = _toneColors(tone, fallback: urgencyCfg.fg);
 
+    final mech = (j['assignedMechanic'] is Map<String, dynamic>)
+        ? j['assignedMechanic'] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final mechanicName = ((mech['displayName'] as String?) ?? '').trim();
+
+    final amount = (j['finalAmount'] as num?) ??
+        (j['acceptedAmount'] as num?) ??
+        (j['estimatedPayout'] as num?);
+    final currency = ((j['currency'] as String?) ?? 'GBP').toUpperCase();
+    final paySym = switch (currency) { 'GBP' => '£', 'USD' => r'$', 'EUR' => '€', _ => '' };
+    final payStr = amount != null ? '$paySym${amount.round()}' : null;
+
     return FleetJobSummary(
       id: displayId,
       backendId: backendId.isNotEmpty ? backendId : null,
@@ -566,6 +856,8 @@ class FleetViewModel extends ChangeNotifier {
       urgencyBgHex: urgencyCfg.bg.toARGB32(),
       statusColorHex: statusCfg.fg.toARGB32(),
       statusBgHex: statusCfg.bg.toARGB32(),
+      mechanic: mechanicName.isNotEmpty ? mechanicName : null,
+      pay: payStr,
     );
   }
 
@@ -592,11 +884,49 @@ class FleetViewModel extends ChangeNotifier {
   bool get isEditingProfileForPostJob => _returnTabAfterProfileEdit == 'post-job';
 
   void setTab(String value) {
+    if (tab == 'profile-messages-chat' && value != 'profile-messages-chat') {
+      activeFleetInboxChat = null;
+    }
     tab = value;
     notifyListeners();
     if (value == 'profile') {
       loadMeProfile();
     }
+    if (value == 'profile-messages') {
+      loadFleetInboxThreads();
+    }
+  }
+
+  Future<void> loadFleetInboxThreads() async {
+    fleetInboxLoading = true;
+    fleetInboxError = null;
+    notifyListeners();
+    try {
+      final token = _auth.session?.accessToken;
+      if (token == null || token.trim().isEmpty) {
+        throw Exception('Missing access token. Please login again.');
+      }
+      final env = await _chat.fetchThreads(accessToken: token);
+      fleetInboxThreads = ChatApiService.parseThreadsEnvelope(env);
+    } catch (e) {
+      fleetInboxError = e.toString();
+    } finally {
+      fleetInboxLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void openFleetInboxChat(ChatInboxThreadRow row) {
+    activeFleetInboxChat = row;
+    tab = 'profile-messages-chat';
+    notifyListeners();
+  }
+
+  void closeFleetInboxChat() {
+    activeFleetInboxChat = null;
+    tab = 'profile-messages';
+    notifyListeners();
+    loadFleetInboxThreads();
   }
 
   void openFleetEditProfile({required bool fromPostJobGate}) {
@@ -630,13 +960,19 @@ class FleetViewModel extends ChangeNotifier {
 
   void selectVehicle(Vehicle v) {
     selectedVehicle = v;
+    vehicleDetailPayload = null;
+    vehicleDetailError = null;
     showVehicles = false;
     tab = 'vehicle-detail';
     notifyListeners();
+    loadFleetVehicleDetail(v.id);
   }
 
   void clearSelectedVehicle() {
     selectedVehicle = null;
+    vehicleDetailPayload = null;
+    vehicleDetailError = null;
+    vehicleDetailLoading = false;
     tab = 'profile';
     notifyListeners();
     loadMeProfile();
@@ -651,6 +987,7 @@ class FleetViewModel extends ChangeNotifier {
   void openVehicles() {
     showVehicles = true;
     notifyListeners();
+    loadFleetVehicles();
   }
 
   void closeVehicles() {
@@ -663,6 +1000,7 @@ class FleetViewModel extends ChangeNotifier {
   void openPayment() {
     showPaymentMethods = true;
     notifyListeners();
+    loadBillingPaymentMethods();
   }
 
   void closePayment() {
@@ -707,7 +1045,12 @@ class FleetViewModel extends ChangeNotifier {
   String get bottomNavActive {
     if (tab == 'tracking-detail' || tab == 'quote-received') return 'tracking';
     if (tab == 'edit-profile' && isEditingProfileForPostJob) return 'post-job';
-    if (tab == 'edit-profile' || tab == 'payment-methods' || tab == 'vehicles' || tab == 'vehicle-detail') {
+    if (tab == 'edit-profile' ||
+        tab == 'payment-methods' ||
+        tab == 'vehicles' ||
+        tab == 'vehicle-detail' ||
+        tab == 'profile-messages' ||
+        tab == 'profile-messages-chat') {
       return 'profile';
     }
     return tab;

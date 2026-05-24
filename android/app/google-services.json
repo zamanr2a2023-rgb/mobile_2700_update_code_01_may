@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "325226809073",
+    "project_id": "truckfix-f840b",
+    "storage_bucket": "truckfix-f840b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:325226809073:android:f27df03b662ed2ab4b0b50",
+        "android_client_info": {
+          "package_name": "r2a.truckfix.truckfix"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXOCiAKHOn3Hj52hJhXe9HspnpHSf78nQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

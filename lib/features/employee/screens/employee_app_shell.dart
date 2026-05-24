@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
-import '../../../routes/app_routes.dart';
-import '../../auth/viewmodel/auth_viewmodel.dart';
+import '../../../data/repositories/app_repository.dart';
+import '../../../data/services/mechanic_api_service.dart';
+import '../../mechanic/screens/mechanic_app_shell.dart';
+import '../../mechanic/viewmodel/mechanic_viewmodel.dart';
+import 'employee_profile_page.dart';
 
 class EmployeeViewModel extends ChangeNotifier {
   String screen = 'employee-jobs';
@@ -22,8 +24,17 @@ class EmployeeAppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => EmployeeViewModel(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (ctx) => MechanicViewModel(
+            ctx.read<JobRepository>(),
+            ctx.read<AuthRepository>(),
+            MechanicApiService(),
+          ),
+        ),
+        ChangeNotifierProvider(create: (_) => EmployeeViewModel()),
+      ],
       child: const _EmpScaffold(),
     );
   }
@@ -39,7 +50,7 @@ class _EmpScaffold extends StatelessWidget {
       backgroundColor: AppColors.bg,
       body: Column(
         children: [
-          Expanded(
+          const Expanded(
             child: _EmployeePageContent(),
           ),
           _EmpTabBar(vm: vm),
@@ -50,41 +61,23 @@ class _EmpScaffold extends StatelessWidget {
 }
 
 class _EmployeePageContent extends StatelessWidget {
+  const _EmployeePageContent();
+
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<EmployeeViewModel>();
     if (vm.screen == 'employee-tracker') {
-      return _EmployeeTracker(() => vm.setScreen('employee-jobs'));
+      return MechanicJobTrackerPage(
+        onBack: () {
+          context.read<MechanicViewModel>().clearJobTrackerSelection();
+          vm.setScreen('employee-jobs');
+        },
+      );
     }
     if (vm.screen == 'employee-profile') {
-      return const _EmployeeProfilePage();
+      return const EmployeeProfilePage();
     }
-    return _EmployeeJobs(vm);
-  }
-}
-
-class _EmployeeProfilePage extends StatelessWidget {
-  const _EmployeeProfilePage();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        const ListTile(
-          title: Text('Mechanic employee', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-          subtitle: Text('swiftmechanics.co.uk', style: TextStyle(color: AppColors.textMuted)),
-        ),
-        OutlinedButton.icon(
-          onPressed: () async {
-            await context.read<AuthViewModel>().logout();
-            if (context.mounted) context.go(AppRoutes.login);
-          },
-          icon: const Icon(Icons.logout, color: AppColors.red),
-          label: const Text('Log out', style: TextStyle(color: AppColors.red)),
-        ),
-      ],
-    );
+    return const _EmployeeJobsList();
   }
 }
 
@@ -138,50 +131,377 @@ class _EmpTabBar extends StatelessWidget {
   }
 }
 
-class _EmployeeJobs extends StatelessWidget {
-  const _EmployeeJobs(this.vm);
+/// Same API and list layout as mechanic **My Jobs** (`GET /api/v1/jobs?tab=active`).
+class _EmployeeJobsList extends StatefulWidget {
+  const _EmployeeJobsList();
 
-  final EmployeeViewModel vm;
+  @override
+  State<_EmployeeJobsList> createState() => _EmployeeJobsListState();
+}
+
+class _EmployeeJobsListState extends State<_EmployeeJobsList> {
+  static const _kBlue = Color(0xFF60A5FA);
+  static const _kYellow = Color(0xFFFACC15);
+  static const _kAmber = Color(0xFFF59E0B);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<MechanicViewModel>().loadMyJobs();
+    });
+  }
+
+  ({String label, Color dot, Color fg, Color bg, Color border, bool pulse}) _statusCfg(String tone, String label) {
+    return switch (tone) {
+      'green' => (
+          label: label,
+          dot: AppColors.green,
+          fg: AppColors.green,
+          bg: AppColors.green.withValues(alpha: 0.10),
+          border: AppColors.green.withValues(alpha: 0.30),
+          pulse: false,
+        ),
+      'blue' => (
+          label: label,
+          dot: _kBlue,
+          fg: _kBlue,
+          bg: _kBlue.withValues(alpha: 0.10),
+          border: _kBlue.withValues(alpha: 0.30),
+          pulse: false,
+        ),
+      'amber' => (
+          label: label,
+          dot: _kAmber,
+          fg: _kAmber,
+          bg: _kAmber.withValues(alpha: 0.10),
+          border: _kAmber.withValues(alpha: 0.30),
+          pulse: true,
+        ),
+      'yellow' => (
+          label: label,
+          dot: _kYellow,
+          fg: _kYellow,
+          bg: _kYellow.withValues(alpha: 0.10),
+          border: _kYellow.withValues(alpha: 0.30),
+          pulse: false,
+        ),
+      _ => (
+          label: label,
+          dot: AppColors.textMuted,
+          fg: AppColors.textMuted,
+          bg: AppColors.textMuted.withValues(alpha: 0.08),
+          border: AppColors.textMuted.withValues(alpha: 0.20),
+          pulse: false,
+        ),
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    final mech = context.watch<MechanicViewModel>();
+    final emp = context.read<EmployeeViewModel>();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('My Jobs', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 22)),
-        const Text('Assigned by company', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-        const SizedBox(height: 16),
-        ListTile(
-          tileColor: AppColors.card,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: const Text('Scania R450 · Brake fault', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-          subtitle: const Text('Birmingham Depot · 2.3 mi', style: TextStyle(color: AppColors.textMuted)),
-          onTap: () => vm.setScreen('employee-tracker'),
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+          decoration: const BoxDecoration(
+            color: AppColors.bg,
+            border: Border(bottom: BorderSide(color: AppColors.border)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'My Jobs',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 20),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                mech.myJobsLoading
+                    ? 'Loading…'
+                    : '${mech.myJobsTotalActive} accepted job${mech.myJobsTotalActive == 1 ? '' : 's'}',
+                style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.85), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Builder(builder: (context) {
+            if (mech.myJobsLoading) {
+              return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+            }
+            if (mech.myJobsError != null) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.error_outline, color: AppColors.textMuted, size: 40),
+                      const SizedBox(height: 12),
+                      Text(
+                        mech.myJobsError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      OutlinedButton(
+                        onPressed: mech.loadMyJobs,
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.primary),
+                          foregroundColor: AppColors.primary,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            if (mech.myActiveJobs.isEmpty) {
+              return const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.work_outline, color: AppColors.textMuted, size: 48),
+                    SizedBox(height: 12),
+                    Text(
+                      'No active jobs',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              itemCount: mech.myActiveJobs.length,
+              itemBuilder: (context, i) {
+                final job = mech.myActiveJobs[i];
+                final cfg = _statusCfg(job.statusTone, job.statusLabel);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Material(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: () {
+                        final id = job.backendId.trim();
+                        if (id.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Missing job id — cannot open tracker.')),
+                          );
+                          return;
+                        }
+                        mech.selectJobForTracker(id);
+                        emp.setScreen('employee-tracker');
+                      },
+                      borderRadius: BorderRadius.circular(14),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          job.jobCode,
+                                          style: const TextStyle(
+                                            color: AppColors.textMuted,
+                                            fontSize: 10,
+                                            fontFamily: 'monospace',
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          job.truck,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          job.fleet,
+                                          style: TextStyle(
+                                            color: AppColors.textSecondary.withValues(alpha: 0.75),
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: cfg.bg,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: cfg.border),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _EmployeeStatusDot(color: cfg.dot, pulse: cfg.pulse),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          cfg.label,
+                                          style: TextStyle(
+                                            color: cfg.fg,
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 0.6,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                job.issue,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Text(
+                                    job.pay,
+                                    style: const TextStyle(
+                                      color: AppColors.primary,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  if (job.scheduledForLabel != null) ...[
+                                    const SizedBox(width: 12),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.access_time_rounded, size: 14, color: cfg.fg),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          job.scheduledForLabel!,
+                                          style: TextStyle(
+                                            color: cfg.fg,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ] else if (job.etaMinutes != null && job.etaMinutes! > 0) ...[
+                                    const SizedBox(width: 12),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.timer_outlined, size: 14, color: cfg.fg),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'ETA ${job.etaMinutes} min',
+                                          style: TextStyle(
+                                            color: cfg.fg,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                  const Spacer(),
+                                  if (job.distanceLabel != null) ...[
+                                    Icon(Icons.location_on_outlined, size: 14, color: AppColors.textMuted),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      job.distanceLabel!,
+                                      style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                                    ),
+                                    const SizedBox(width: 2),
+                                  ],
+                                  Icon(Icons.chevron_right, size: 18, color: AppColors.textHint),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          }),
         ),
       ],
     );
   }
 }
 
-class _EmployeeTracker extends StatelessWidget {
-  const _EmployeeTracker(this.onBack);
+class _EmployeeStatusDot extends StatefulWidget {
+  const _EmployeeStatusDot({required this.color, required this.pulse});
 
-  final VoidCallback onBack;
+  final Color color;
+  final bool pulse;
+
+  @override
+  State<_EmployeeStatusDot> createState() => _EmployeeStatusDotState();
+}
+
+class _EmployeeStatusDotState extends State<_EmployeeStatusDot> with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(
-          children: [
-            IconButton(onPressed: onBack, icon: const Icon(Icons.arrow_back_ios_new)),
-            const Text('Job tracker', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        const Text('En route to driver · ETA 15 min', style: TextStyle(color: AppColors.textSecondary)),
-      ],
+    if (!widget.pulse) {
+      return Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+      );
+    }
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, child) {
+        return Opacity(
+          opacity: 0.45 + 0.55 * _c.value,
+          child: child,
+        );
+      },
+      child: Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(color: widget.color, shape: BoxShape.circle),
+      ),
     );
   }
 }

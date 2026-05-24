@@ -4,9 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class TruckFixLoadingScreen extends StatefulWidget {
-  const TruckFixLoadingScreen({super.key});
+  const TruckFixLoadingScreen({super.key, this.onAnimationComplete});
+
+  /// Fired once when the gear ring animation finishes a full forward cycle (same moment [totalDuration] elapses).
+  final VoidCallback? onAnimationComplete;
 
   static const Color accent = Color(0xFFFFD700);
+
+  /// Must match [AnimationController] duration below (intro gate uses [onAnimationComplete]).
+  static const Duration totalDuration = Duration(milliseconds: 2200);
 
   @override
   State<TruckFixLoadingScreen> createState() => _TruckFixLoadingScreenState();
@@ -16,16 +22,23 @@ class _TruckFixLoadingScreenState extends State<TruckFixLoadingScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  static const Duration _total = Duration(milliseconds: 2200);
-
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: _total)..forward();
+    _controller = AnimationController(vsync: this, duration: TruckFixLoadingScreen.totalDuration)
+      ..addStatusListener(_onAnimStatus)
+      ..forward();
+  }
+
+  void _onAnimStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      widget.onAnimationComplete?.call();
+    }
   }
 
   @override
   void dispose() {
+    _controller.removeStatusListener(_onAnimStatus);
     _controller.dispose();
     super.dispose();
   }
@@ -243,6 +256,28 @@ class _GearPainter extends CustomPainter {
 
     final metrics = path.computeMetrics().toList(growable: false);
     final totalLen = metrics.fold<double>(0, (sum, m) => sum + m.length);
+
+    // Near end of the sweep, path extraction can leave a visible gap on the closed gear; draw the full ring.
+    if (progress >= 0.999) {
+      final glowPaintFull = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4.5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = TruckFixLoadingScreen.accent.withValues(alpha: 0.55)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      final paintFull = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4.5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..color = TruckFixLoadingScreen.accent
+        ..isAntiAlias = true;
+      canvas.drawPath(path, glowPaintFull);
+      canvas.drawPath(path, paintFull);
+      return;
+    }
+
     final drawLen = totalLen * progress.clamp(0, 1);
 
     final glowPaint = Paint()

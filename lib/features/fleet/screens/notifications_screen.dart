@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/services/fleet_api_service.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
+import '../models/notification_navigation.dart';
 import '../viewmodel/fleet_viewmodel.dart';
 
 /// Fleet notifications (`NotificationsScreen` / fleet reference UI).
@@ -16,6 +17,8 @@ class FleetNotificationsOverlay extends StatefulWidget {
 
 class _NotifRowModel {
   _NotifRowModel({
+    required this.id,
+    required this.type,
     required this.headline,
     required this.detail,
     required this.when,
@@ -23,6 +26,8 @@ class _NotifRowModel {
     required this.leading,
   });
 
+  final String id;
+  final String type;
   final String headline;
   final String detail;
   final String when;
@@ -45,6 +50,7 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
   bool _loading = true;
   String? _error;
   int _unreadCountFromApi = 0;
+  String? _openingNotificationId;
 
   @override
   void initState() {
@@ -75,8 +81,69 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
         return (bg: AppColors.red, icon: Icons.directions_car_rounded);
       case 'SUPPORT_TICKET_CREATED':
         return (bg: _supportBlue, icon: Icons.support_agent_rounded);
+      case 'CHAT_MESSAGE':
+        return (bg: const Color(0xFF374151), icon: Icons.chat_bubble_outline_rounded);
       default:
         return (bg: const Color(0xFF374151), icon: Icons.notifications_rounded);
+    }
+  }
+
+  static String? _notificationId(Map<String, dynamic> m) {
+    final id = m['id'] ?? m['_id'];
+    if (id == null) return null;
+    final s = id.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  Future<void> _onNotificationTap(_NotifRowModel row) async {
+    if (_openingNotificationId != null) return;
+
+    final token = context.read<AuthViewModel>().session?.accessToken?.trim();
+    if (token == null || token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in again.')),
+      );
+      return;
+    }
+
+    setState(() => _openingNotificationId = row.id);
+
+    try {
+      final res = await _api.fetchNotificationById(accessToken: token, notificationId: row.id);
+      if (!mounted) return;
+
+      final raw = res['data'];
+      if (raw is! Map) {
+        throw FleetApiException('Invalid notification response.');
+      }
+      final data = Map<String, dynamic>.from(raw);
+
+      final chatSession = fleetChatSessionFromNotificationData(data);
+      if (chatSession == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This notification cannot be opened here.')),
+        );
+        return;
+      }
+
+      if (row.unread) {
+        setState(() {
+          row.unread = false;
+          _unreadCountFromApi = (_unreadCountFromApi - 1).clamp(0, 999999);
+        });
+      }
+
+      final vm = context.read<FleetViewModel>();
+      vm.closeNotifications();
+      vm.openJobChat(chatSession);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _openingNotificationId = null);
     }
   }
 
@@ -108,6 +175,9 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
         for (final item in data) {
           if (item is! Map) continue;
           final m = item.cast<String, dynamic>();
+          final id = _notificationId(m);
+          if (id == null) continue;
+
           final type = (m['type'] as String?) ?? '';
           final title = (m['title'] as String?) ?? '';
           final body = (m['body'] as String?) ?? '';
@@ -117,6 +187,8 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
           final cfg = _iconForType(type);
           rows.add(
             _NotifRowModel(
+              id: id,
+              type: type,
               headline: title.isEmpty ? type : title,
               detail: body,
               when: createdAt.isEmpty ? '' : _timeAgo(createdAt),
@@ -283,16 +355,13 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
                                 separatorBuilder: (_, __) => const Divider(height: 1, thickness: 1, color: _divider),
                                 itemBuilder: (context, i) {
                                   final r = _rows[i];
+                                  final opening = _openingNotificationId == r.id;
                                   return Material(
                                     color: r.unread ? _unreadRowBg : _bg,
                                     child: InkWell(
-                                      onTap: () {
-                                        if (!r.unread) return;
-                                        setState(() {
-                                          r.unread = false;
-                                          _unreadCountFromApi = (_unreadCountFromApi - 1).clamp(0, 999999);
-                                        });
-                                      },
+                                      onTap: _openingNotificationId != null && !opening
+                                          ? null
+                                          : () => _onNotificationTap(r),
                                       child: Padding(
                                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                                         child: Row(
@@ -337,7 +406,19 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            if (r.unread)
+                                            if (opening)
+                                              const Padding(
+                                                padding: EdgeInsets.only(top: 2),
+                                                child: SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    color: AppColors.primary,
+                                                  ),
+                                                ),
+                                              )
+                                            else if (r.unread)
                                               Padding(
                                                 padding: const EdgeInsets.only(top: 6),
                                                 child: Container(

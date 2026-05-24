@@ -41,6 +41,9 @@ abstract final class AppRouter {
       case 'mechanic-dashboard':
         router.go(AppRoutes.mechanicHome);
         return;
+      case 'employee-dashboard':
+        router.go(AppRoutes.employeeHome);
+        return;
       case 'company-dashboard':
         router.go(AppRoutes.companyHome);
         return;
@@ -61,6 +64,9 @@ abstract final class AppRouter {
         return;
       case 'mechanic-terms':
         router.go(AppRoutes.termsMechanic);
+        return;
+      case 'forgot':
+        router.push(AppRoutes.forgot);
         return;
       default:
         router.go(AppRoutes.splash);
