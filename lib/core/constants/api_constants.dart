@@ -33,6 +33,9 @@ abstract final class ApiConstants {
   /// Fleet billing: saved cards & bank methods.
   static const String billingPaymentMethodsPath = '/api/v1/billing/payment-methods';
 
+  /// Stripe publishable key for Flutter Stripe SDK (`GET`, Bearer auth).
+  static const String billingStripeConfigPath = '/api/v1/billing/stripe/config';
+
   /// Register FCM device token for push (`POST`, Bearer auth).
   static const String notificationsDeviceTokensPath =
       '/api/v1/notifications/device-tokens';

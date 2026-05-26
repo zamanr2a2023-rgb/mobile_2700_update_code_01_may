@@ -190,6 +190,21 @@ class FleetApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to fetch quotes');
   }
 
+  /// `GET /api/v1/billing/stripe/config`
+  Future<Map<String, dynamic>> fetchStripeBillingConfig({
+    required String accessToken,
+  }) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.billingStripeConfigPath}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load Stripe config');
+  }
+
   /// `GET /api/v1/billing/payment-methods`
   Future<Map<String, dynamic>> fetchBillingPaymentMethods({
     required String accessToken,

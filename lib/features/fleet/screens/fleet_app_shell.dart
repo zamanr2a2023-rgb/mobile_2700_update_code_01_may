@@ -5863,6 +5863,43 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
     final apiHasDefault = api.any((m) => m.isDefault);
 
     final listTiles = <Widget>[
+      if (vm.stripeBillingInitLoading)
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+            ),
+          ),
+        ),
+      if (vm.stripeBillingInitError != null && vm.stripeBillingInitError!.trim().isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.red.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.red.withValues(alpha: 0.25)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  vm.stripeBillingInitError!,
+                  style: TextStyle(color: AppColors.red.withValues(alpha: 0.95), fontSize: 12, height: 1.35),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () => vm.ensureStripeBillingReady(),
+                  child: const Text('Retry Stripe setup', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          ),
+        ),
       if (err != null && err.trim().isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(bottom: 12),

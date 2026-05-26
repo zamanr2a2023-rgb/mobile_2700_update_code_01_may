@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../core/services/stripe_billing_service.dart';
 import '../../../data/models/fleet_billing_payment_method.dart';
+import '../../../data/models/stripe_billing_config.dart';
 import '../../../data/models/fleet_job_quote.dart';
 import '../../../data/models/fleet_job_summary.dart';
 import '../../../data/models/fleet_me_profile.dart';
@@ -89,9 +93,11 @@ class FleetViewModel extends ChangeNotifier {
     FleetApiService? api,
     UsersApiService? usersApi,
     ChatApiService? chatApi,
+    StripeBillingService? stripeBilling,
   })  : _api = api ?? FleetApiService(),
         _usersApi = usersApi ?? UsersApiService(),
-        _chat = chatApi ?? ChatApiService() {
+        _chat = chatApi ?? ChatApiService(),
+        _stripeBilling = stripeBilling ?? StripeBillingService() {
     refresh();
   }
 
@@ -99,6 +105,7 @@ class FleetViewModel extends ChangeNotifier {
   final FleetApiService _api;
   final UsersApiService _usersApi;
   final ChatApiService _chat;
+  final StripeBillingService _stripeBilling;
 
   String tab = 'dashboard';
   bool profileComplete = false;
@@ -164,6 +171,12 @@ class FleetViewModel extends ChangeNotifier {
   List<FleetBillingPaymentMethod> billingPaymentMethods = const [];
   bool billingPaymentMethodsLoading = false;
   String? billingPaymentMethodsError;
+
+  /// `GET /api/v1/billing/stripe/config` — Flutter Stripe SDK ready when true.
+  bool stripeBillingReady = false;
+  bool stripeBillingInitLoading = false;
+  String? stripeBillingInitError;
+  StripeBillingConfig? stripeBillingConfig;
 
   /// Quotes for the dashboard job sheet (`GET .../jobs/:id/quotes`).
   List<FleetJobQuote> jobQuotes = const [];
@@ -434,6 +447,39 @@ class FleetViewModel extends ChangeNotifier {
     await _api.acceptQuote(accessToken: token, quoteId: id);
   }
 
+  /// Fleet API flow step 1: fetch publishable key and init Flutter Stripe SDK.
+  Future<void> ensureStripeBillingReady({bool silent = false}) async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      if (!silent) {
+        stripeBillingInitError = 'Not signed in';
+        stripeBillingReady = false;
+        notifyListeners();
+      }
+      return;
+    }
+    if (!silent) {
+      stripeBillingInitLoading = true;
+      stripeBillingInitError = null;
+      notifyListeners();
+    }
+    try {
+      final config = await _stripeBilling.ensureInitialized(accessToken: token);
+      stripeBillingConfig = config;
+      stripeBillingReady = true;
+      stripeBillingInitError = null;
+    } catch (e) {
+      stripeBillingReady = false;
+      stripeBillingConfig = null;
+      stripeBillingInitError = e.toString();
+    } finally {
+      if (!silent) {
+        stripeBillingInitLoading = false;
+      }
+      notifyListeners();
+    }
+  }
+
   /// `GET /api/v1/billing/payment-methods` (optionally refresh without clearing the overlay).
   Future<void> loadBillingPaymentMethods({bool silent = false}) async {
     final token = _auth.session?.accessToken;
@@ -659,6 +705,7 @@ class FleetViewModel extends ChangeNotifier {
       hasLoadedOnce = true;
 
       await loadFleetVehicles(silent: true);
+      unawaited(ensureStripeBillingReady(silent: true));
     } catch (e) {
       loadError = e.toString();
     } finally {
@@ -1000,6 +1047,7 @@ class FleetViewModel extends ChangeNotifier {
   void openPayment() {
     showPaymentMethods = true;
     notifyListeners();
+    unawaited(ensureStripeBillingReady());
     loadBillingPaymentMethods();
   }
 
