@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_stripe/flutter_stripe.dart';
 
 import '../../../core/services/stripe_billing_service.dart';
 import '../../../data/models/fleet_billing_payment_method.dart';
@@ -384,7 +385,19 @@ class FleetViewModel extends ChangeNotifier {
   }
 
   /// `PATCH /api/v1/jobs/:jobId/complete/approve`
-  Future<void> approveJobCompletion(String backendJobId) async {
+  ///
+  /// Per `payment.md` §5:
+  /// - With a saved card: pass [paymentMethodId] = the saved card Mongo `_id`
+  ///   (NOT the Stripe `pm_…`) plus a numeric [finalAmount].
+  /// - Hand Cash (fleet only): omit [paymentMethodId] and pass [finalAmount].
+  // TODO: handle HTTP 402 (3DS / payment still processing) by retrieving
+  // `pi_…` from the response and calling
+  // `POST /billing/stripe/payment-intents/:id/sync` until SUCCEEDED.
+  Future<void> approveJobCompletion(
+    String backendJobId, {
+    String? paymentMethodId,
+    num? finalAmount,
+  }) async {
     final token = _auth.session?.accessToken;
     if (token == null || token.trim().isEmpty) {
       throw Exception('Not signed in');
@@ -393,7 +406,68 @@ class FleetViewModel extends ChangeNotifier {
     if (id.isEmpty) {
       throw Exception('Invalid job');
     }
-    await _api.approveJobCompletion(accessToken: token, jobId: id);
+    await _api.approveJobCompletion(
+      accessToken: token,
+      jobId: id,
+      paymentMethodId: paymentMethodId,
+      finalAmount: finalAmount,
+    );
+  }
+
+  /// Runs `payment.md` §4 Steps 2–4: SetupIntent → Stripe PaymentSheet → attach.
+  ///
+  /// Returns `null` on success, or a user-facing error message string. Returns
+  /// the special sentinel `'CANCELED'` if the user dismissed the Stripe sheet.
+  Future<String?> addStripeCard() async {
+    final token = _auth.session?.accessToken;
+    if (token == null || token.trim().isEmpty) {
+      return 'Not signed in';
+    }
+    try {
+      await ensureStripeBillingReady(silent: true);
+      if (!stripeBillingReady) {
+        return stripeBillingInitError ?? 'Stripe is not ready';
+      }
+
+      final body = await _api.createStripeSetupIntent(accessToken: token);
+      final data = (body['data'] is Map<String, dynamic>) ? body['data'] as Map<String, dynamic> : const <String, dynamic>{};
+      final clientSecret = ((data['clientSecret'] as String?) ?? '').trim();
+      final setupIntentId = ((data['setupIntentId'] as String?) ?? '').trim();
+      if (clientSecret.isEmpty) {
+        return 'Stripe SetupIntent is missing clientSecret';
+      }
+
+      await Stripe.instance.initPaymentSheet(
+        paymentSheetParameters: SetupPaymentSheetParameters(
+          merchantDisplayName: 'TruckFix',
+          setupIntentClientSecret: clientSecret,
+          style: ThemeMode.dark,
+        ),
+      );
+      await Stripe.instance.presentPaymentSheet();
+
+      final setupIntent = await Stripe.instance.retrieveSetupIntent(clientSecret);
+      final pmId = setupIntent.paymentMethodId.trim();
+      if (pmId.isEmpty) {
+        return 'Stripe did not return a payment method';
+      }
+
+      await _api.attachStripePaymentMethod(
+        accessToken: token,
+        paymentMethodId: pmId,
+        isDefault: true,
+        setupIntentId: setupIntentId.isEmpty ? null : setupIntentId,
+      );
+      await loadBillingPaymentMethods(silent: true);
+      return null;
+    } on StripeException catch (e) {
+      if (e.error.code == FailureCode.Canceled) {
+        return 'CANCELED';
+      }
+      return e.error.localizedMessage ?? e.error.message ?? e.toString();
+    } catch (e) {
+      return e.toString();
+    }
   }
 
   /// `POST /api/v1/fleet/reviews`
@@ -905,6 +979,7 @@ class FleetViewModel extends ChangeNotifier {
       statusBgHex: statusCfg.bg.toARGB32(),
       mechanic: mechanicName.isNotEmpty ? mechanicName : null,
       pay: payStr,
+      payAmount: amount,
     );
   }
 

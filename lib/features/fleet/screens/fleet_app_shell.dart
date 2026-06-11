@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../data/models/fleet_billing_payment_method.dart';
 import '../../../data/models/fleet_job_quote.dart';
 import '../../../data/models/fleet_job_summary.dart';
 import '../../../data/models/fleet_vehicle_detail.dart';
@@ -629,6 +630,7 @@ class _FleetCompletionReviewOverlay extends StatefulWidget {
     required this.truckLine,
     required this.totalCost,
     this.backendJobId,
+    this.payAmount,
     required this.onClose,
   });
 
@@ -637,6 +639,10 @@ class _FleetCompletionReviewOverlay extends StatefulWidget {
   final String totalCost;
   /// Mongo/backend job id for `PATCH .../jobs/:id/complete/approve`.
   final String? backendJobId;
+
+  /// Numeric `finalAmount` sent on approve. Falls back to the formatted
+  /// [totalCost] when null (Hand Cash path can still go through).
+  final num? payAmount;
   final VoidCallback onClose;
 
   @override
@@ -654,13 +660,79 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
   bool _approveLoading = false;
   String? _approveErr;
 
+  /// Selected saved-card Mongo `_id`. When `null`, Hand Cash is used.
+  String? _selectedCardId;
+  bool _addingCard = false;
+  bool _initialSelectionApplied = false;
+
   static const Color _sheetBg = Color(0xFF0E0E0E);
   static const Color _approveGreen = Color(0xFF4ADE80);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final vm = context.read<FleetViewModel>();
+      vm.ensureStripeBillingReady(silent: true);
+      vm.loadBillingPaymentMethods();
+    });
+  }
 
   @override
   void dispose() {
     _reviewText.dispose();
     super.dispose();
+  }
+
+  void _applyDefaultCardSelection(List<FleetBillingPaymentMethod> cards) {
+    if (_initialSelectionApplied) return;
+    if (cards.isEmpty) {
+      _initialSelectionApplied = true;
+      return;
+    }
+    FleetBillingPaymentMethod? def;
+    for (final c in cards) {
+      if (c.isDefault) {
+        def = c;
+        break;
+      }
+    }
+    _selectedCardId = (def ?? cards.first).id;
+    _initialSelectionApplied = true;
+  }
+
+  Future<void> _onAddCard() async {
+    if (_addingCard) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final vm = context.read<FleetViewModel>();
+    setState(() {
+      _addingCard = true;
+      _approveErr = null;
+    });
+    final result = await vm.addStripeCard();
+    if (!mounted) return;
+    setState(() => _addingCard = false);
+    if (result == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Card saved')));
+      final cards = vm.billingPaymentMethods;
+      if (cards.isNotEmpty) {
+        setState(() {
+          FleetBillingPaymentMethod? def;
+          for (final c in cards) {
+            if (c.isDefault) {
+              def = c;
+              break;
+            }
+          }
+          _selectedCardId = (def ?? cards.first).id;
+        });
+      }
+    } else if (result == 'CANCELED') {
+      // User dismissed the sheet — no UI noise needed.
+    } else {
+      messenger?.showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   Future<void> _submitReview() async {
@@ -760,6 +832,8 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
   }
 
   Widget _buildApproval() {
+    final vm = context.watch<FleetViewModel>();
+    _applyDefaultCardSelection(vm.billingPaymentMethods);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -811,7 +885,9 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
             ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        _paymentMethodPicker(vm),
+        const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -861,7 +937,11 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
                       _approveErr = null;
                     });
                     try {
-                      await vm.approveJobCompletion(id);
+                      await vm.approveJobCompletion(
+                        id,
+                        paymentMethodId: _selectedCardId,
+                        finalAmount: widget.payAmount,
+                      );
                       if (!mounted) return;
                       setState(() {
                         _approveLoading = false;
@@ -919,6 +999,153 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
         ),
         Text(value, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
       ],
+    );
+  }
+
+  Widget _paymentMethodPicker(FleetViewModel vm) {
+    final cards = vm.billingPaymentMethods;
+    final loading = vm.billingPaymentMethodsLoading || vm.stripeBillingInitLoading;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.card2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF1E1E1E)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                'PAYMENT METHOD',
+                style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.2),
+              ),
+              const Spacer(),
+              if (loading)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _payMethodRow(
+            selected: _selectedCardId == null,
+            icon: Icons.payments_rounded,
+            title: 'Hand Cash',
+            subtitle: 'Pay the mechanic in person',
+            onTap: _approveLoading || _addingCard
+                ? null
+                : () => setState(() => _selectedCardId = null),
+          ),
+          for (final c in cards) ...[
+            const SizedBox(height: 8),
+            _payMethodRow(
+              selected: _selectedCardId == c.id,
+              icon: Icons.credit_card_rounded,
+              title: '${c.displayBrand} •••• ${c.last4}',
+              subtitle: c.expiryLabel == '—' ? null : 'Exp ${c.expiryLabel}',
+              trailingChip: c.isDefault ? 'Default' : null,
+              onTap: _approveLoading || _addingCard
+                  ? null
+                  : () => setState(() => _selectedCardId = c.id),
+            ),
+          ],
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: _approveLoading || _addingCard ? null : _onAddCard,
+            icon: _addingCard
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                  )
+                : Icon(Icons.add_rounded, color: AppColors.primary, size: 18),
+            label: Text(
+              _addingCard ? 'Opening Stripe…' : 'Add new card',
+              style: TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.4),
+            ),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              minimumSize: const Size(0, 0),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              alignment: Alignment.centerLeft,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _payMethodRow({
+    required bool selected,
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    String? trailingChip,
+    VoidCallback? onTap,
+  }) {
+    final borderColor = selected ? AppColors.primary : const Color(0xFF1E1E1E);
+    return Material(
+      color: selected ? AppColors.primary.withValues(alpha: 0.08) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: selected ? 1.5 : 1),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                color: selected ? AppColors.primary : AppColors.textMuted,
+                size: 18,
+              ),
+              const SizedBox(width: 12),
+              Icon(icon, color: selected ? AppColors.primary : AppColors.textMuted, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                    if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.9), fontSize: 11),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailingChip != null && trailingChip.trim().isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    trailingChip,
+                    style: TextStyle(color: AppColors.primary, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.6),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -3070,6 +3297,7 @@ class _FleetDashboardState extends State<_FleetDashboard> {
               truckLine: _fleetTruckDisplay(_completionJob!),
               totalCost: _fleetJobPayDisplay(_completionJob!),
               backendJobId: _completionJob!.backendId,
+              payAmount: _completionJob!.payAmount,
               onClose: () => setState(() => _completionJob = null),
             ),
           if (_jobSheetJob != null)

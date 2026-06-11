@@ -8,8 +8,8 @@ abstract final class ApiConstants {
   /// Kept for backward-compat with existing services.
   static const String baseUrl = authBaseUrl;
 
-  static const String authBaseUrl = 'https://kp-backend-1.onrender.com';
-  static const String usersBaseUrl = 'https://kp-backend-1.onrender.com';
+  static const String authBaseUrl = 'https://api.thetruckfix.co.uk';
+  static const String usersBaseUrl = 'https://api.thetruckfix.co.uk';
 
   static const String authLoginPath = '/api/v1/auth/login';
   static const String authLogoutPath = '/api/v1/auth/logout';
@@ -35,6 +35,13 @@ abstract final class ApiConstants {
 
   /// Stripe publishable key for Flutter Stripe SDK (`GET`, Bearer auth).
   static const String billingStripeConfigPath = '/api/v1/billing/stripe/config';
+
+  /// Start a Stripe SetupIntent to add a card (`POST`, Bearer auth, empty body).
+  static const String billingStripeSetupIntentPath = '/api/v1/billing/stripe/setup-intent';
+
+  /// Attach a confirmed Stripe `pm_…` to the server (`POST`, Bearer auth).
+  static const String billingStripePaymentMethodsAttachPath =
+      '/api/v1/billing/stripe/payment-methods/attach';
 
   /// Register FCM device token for push (`POST`, Bearer auth).
   static const String notificationsDeviceTokensPath =

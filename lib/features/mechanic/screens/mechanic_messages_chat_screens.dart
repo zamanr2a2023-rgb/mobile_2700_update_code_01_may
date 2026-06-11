@@ -263,7 +263,7 @@ class _MechanicPeerChatScreenState extends State<MechanicPeerChatScreen> {
 
   String get _peerAvatar {
     final u = widget.thread.photoUrl?.trim();
-    return (u != null && u.isNotEmpty) ? u! : AppAssets.truckWorkshop;
+    return (u != null && u.isNotEmpty) ? u : AppAssets.truckWorkshop;
   }
 
   @override

@@ -46,10 +46,10 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
   static const Color _bg = Color(0xFF080808);
   static const Color _fieldFill = Color(0xFF111111);
 
-  /// Field labels, hints, and captions — readable on `#080808` (not [AppColors.textHint]).
-  static const Color _fieldLabelColor = AppColors.textSecondary;
-  static const Color _fieldHintColor = AppColors.textSecondary;
-  static const Color _captionColor = AppColors.textSecondary;
+  /// Labels stay bright; hints are deliberately softer so they read as placeholders.
+  static const Color _fieldLabelColor = Color(0xFFE5E7EB);
+  static const Color _fieldHintColor = Color(0xFF6B7280);
+  static const Color _captionColor = Color(0xFF9CA3AF);
   static const double _fieldLabelSize = 12;
   static const double _fieldHintSize = 13;
   static const double _captionSize = 12;
@@ -64,7 +64,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
   double _preAuthAmount = 220;
   bool _submittingJob = false;
 
-  final _vehicleReg = TextEditingController(text: 'CA 456-789');
+  final _vehicleReg = TextEditingController();
   final _vehicleMake = TextEditingController();
   final _trailerMake = TextEditingController();
 
@@ -223,7 +223,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -239,7 +240,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Location is turned off for this app. Open Settings to allow access.'),
+            content: const Text(
+                'Location is turned off for this app. Open Settings to allow access.'),
             action: SnackBarAction(
               label: 'Settings',
               onPressed: () => openAppSettings(),
@@ -249,10 +251,13 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       }
       return false;
     }
-    if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) {
+    if (permission != LocationPermission.whileInUse &&
+        permission != LocationPermission.always) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permission is required to use GPS for this job.')),
+          const SnackBar(
+              content: Text(
+                  'Location permission is required to use GPS for this job.')),
         );
       }
       return false;
@@ -285,7 +290,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
     setState(() => _locating = true);
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
       );
       final latLng = LatLng(pos.latitude, pos.longitude);
       final addr = await _placesService.reverseGeocode(latLng);
@@ -311,7 +317,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _locating = false);
     }
@@ -370,11 +377,14 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
           : 'Breakdown (Unknown Issue)',
     );
 
-    final mode = _jobMode == _FleetJobMode.emergency ? 'EMERGENCY' : 'SCHEDULABLE';
+    final mode =
+        _jobMode == _FleetJobMode.emergency ? 'EMERGENCY' : 'SCHEDULABLE';
     final urgency = _jobMode == _FleetJobMode.emergency ? 'HIGH' : 'MEDIUM';
 
-    final locationAddress =
-        (_selectedLocation.isNotEmpty ? _selectedLocation : _locationQuery.text.trim()).trim();
+    final locationAddress = (_selectedLocation.isNotEmpty
+            ? _selectedLocation
+            : _locationQuery.text.trim())
+        .trim();
 
     final lat = _breakdownLatLng?.latitude ?? _defaultMapTarget.latitude;
     final lng = _breakdownLatLng?.longitude ?? _defaultMapTarget.longitude;
@@ -465,8 +475,9 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
 
     final toDate = _schedToDate.text.trim();
     final toTime = _schedToTime.text.trim();
-    final parsedTo =
-        (toDate.isNotEmpty && toTime.isNotEmpty) ? _parseLocalDateTime(toDate, toTime) : null;
+    final parsedTo = (toDate.isNotEmpty && toTime.isNotEmpty)
+        ? _parseLocalDateTime(toDate, toTime)
+        : null;
     // API rejects equal times and any end before start ("to must be after from").
     final DateTime? to =
         (parsedTo != null && parsedTo.isAfter(from)) ? parsedTo : null;
@@ -502,8 +513,11 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
 
     // Android: if user previously denied with “Don't ask again”, request() returns denied
     // and rationale is false. In that case, take them to Settings.
-    final shouldShow = Platform.isAndroid ? await perm.shouldShowRequestRationale : true;
-    final blocked = status.isPermanentlyDenied || status.isRestricted || (Platform.isAndroid && !shouldShow);
+    final shouldShow =
+        Platform.isAndroid ? await perm.shouldShowRequestRationale : true;
+    final blocked = status.isPermanentlyDenied ||
+        status.isRestricted ||
+        (Platform.isAndroid && !shouldShow);
 
     if (!mounted) return false;
     final msg = blocked
@@ -533,7 +547,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -567,7 +582,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -602,20 +618,23 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
     final tyreErr = _tyreJobValidationError();
     if (tyreErr != null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tyreErr)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(tyreErr)));
       return;
     }
     final schedErr = _schedulableAvailabilityError();
     if (schedErr != null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(schedErr)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(schedErr)));
       return;
     }
     if (_notes.text.trim().isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please describe the problem in Notes before posting your job.'),
+          content: Text(
+              'Please describe the problem in Notes before posting your job.'),
         ),
       );
       return;
@@ -655,7 +674,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       if (!mounted) return;
       final msg = e is JobsApiException
           ? e.message
-          : JobsApiException.userMessage(e.toString().replaceFirst('Exception: ', ''));
+          : JobsApiException.userMessage(
+              e.toString().replaceFirst('Exception: ', ''));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -670,7 +690,11 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
   InputDecoration _dec({String? hint, Widget? prefix}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: _fieldHintColor, fontSize: _fieldHintSize),
+      hintStyle: const TextStyle(
+        color: _fieldHintColor,
+        fontSize: _fieldHintSize,
+        fontWeight: FontWeight.w400,
+      ),
       prefixIcon: prefix,
       filled: true,
       fillColor: _fieldFill,
@@ -748,10 +772,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
               const SizedBox(height: 4),
               Text(
                 subtitle,
-                style: TextStyle(
-                    color: _captionColor,
-                    fontSize: 12,
-                    height: 1.35),
+                style:
+                    TextStyle(color: _captionColor, fontSize: 12, height: 1.35),
               ),
             ],
           ),
@@ -780,9 +802,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
               const SizedBox(height: 4),
               Text(
                 'Get mechanics responding in minutes',
-                style: TextStyle(
-                    color: _captionColor,
-                    fontSize: 12),
+                style: TextStyle(color: _captionColor, fontSize: 12),
               ),
             ],
           ),
@@ -834,9 +854,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                   'Company, contact, and billing can be added anytime under Profile. Continue below to describe your job and get mechanics responding.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      color: _captionColor,
-                      fontSize: 12,
-                      height: 1.45),
+                      color: _captionColor, fontSize: 12, height: 1.45),
                 ),
                 const SizedBox(height: 24),
                 Container(
@@ -918,9 +936,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                 Text(
                   'Opens the job form on this tab. Use Profile to add or edit fleet & payment details.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: _captionColor,
-                      fontSize: 12),
+                  style: TextStyle(color: _captionColor, fontSize: 12),
                 ),
               ],
             ),
@@ -1105,9 +1121,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
               const SizedBox(width: 6),
               Text(
                 '(optional)',
-                style: TextStyle(
-                    color: _captionColor,
-                    fontSize: 12),
+                style: TextStyle(color: _captionColor, fontSize: 12),
               ),
             ],
           ),
@@ -1177,10 +1191,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
               const SizedBox(height: 4),
               const Text(
                 'Fill in details to find a mechanic fast',
-                style: TextStyle(
-                    color: _captionColor,
-                    fontSize: 13,
-                    height: 1.35),
+                style:
+                    TextStyle(color: _captionColor, fontSize: 13, height: 1.35),
               ),
             ],
           ),
@@ -1243,9 +1255,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                     Expanded(child: _smallFieldLabel('Trailer Make & Model')),
                     Text(
                       'Optional',
-                      style: TextStyle(
-                          color: _captionColor,
-                          fontSize: 12),
+                      style: TextStyle(color: _captionColor, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1430,9 +1440,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                         const SizedBox(height: 4),
                         Text(
                           'Type the axle — e.g. "Drive 1", "Steer", "Trailer 2"',
-                          style: TextStyle(
-                              color: _captionColor,
-                              fontSize: 12),
+                          style: TextStyle(color: _captionColor, fontSize: 12),
                         ),
                       ],
                     ),
@@ -1451,9 +1459,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                         color: AppColors.textMuted, size: 20),
                     suffixIcon: _locationQuery.text.isNotEmpty
                         ? IconButton(
-                            icon: Icon(Icons.close_rounded,
-                                color:
-                                    _captionColor),
+                            icon:
+                                Icon(Icons.close_rounded, color: _captionColor),
                             onPressed: () {
                               setState(() {
                                 _locationQuery.clear();
@@ -1484,7 +1491,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                             child: Text(
                               'Keep typing — suggestions come from Google Maps',
                               style: TextStyle(
-                                color: AppColors.textMuted, fontSize: 12),
+                                  color: AppColors.textMuted, fontSize: 12),
                             ),
                           );
                         }
@@ -1495,7 +1502,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                               child: SizedBox(
                                 width: 22,
                                 height: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               ),
                             ),
                           );
@@ -1590,7 +1598,9 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                                       fontWeight: FontWeight.w600),
                                 ),
                                 Text(
-                                  _locating ? 'Getting location…' : _gpsSubtitle,
+                                  _locating
+                                      ? 'Getting location…'
+                                      : _gpsSubtitle,
                                   style: TextStyle(
                                       color: AppColors.textMuted, fontSize: 12),
                                 ),
@@ -1610,9 +1620,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                     Expanded(child: _sectionTitle('Driver Details')),
                     Text(
                       'Optional',
-                      style: TextStyle(
-                          color: _captionColor,
-                          fontSize: 12),
+                      style: TextStyle(color: _captionColor, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1650,9 +1658,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                     Expanded(child: _sectionTitle('Photos')),
                     Text(
                       'Optional · up to 5',
-                      style: TextStyle(
-                          color: _captionColor,
-                          fontSize: 12),
+                      style: TextStyle(color: _captionColor, fontSize: 12),
                     ),
                   ],
                 ),
@@ -1707,20 +1713,19 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(Icons.image_outlined,
-                                color: _captionColor,
-                                size: 18),
+                                color: _captionColor, size: 18),
                             const SizedBox(width: 8),
                             Text(
                               'No photos added yet',
-                              style: TextStyle(
-                                  color: _captionColor,
-                                  fontSize: 11),
+                              style:
+                                  TextStyle(color: _captionColor, fontSize: 11),
                             ),
                           ],
                         )
                       : ListView.separated(
                           scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 10),
                           itemCount: _jobPhotos.length,
                           separatorBuilder: (_, __) => const SizedBox(width: 8),
                           itemBuilder: (context, i) {
@@ -1741,7 +1746,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                                             child: SizedBox(
                                               width: 20,
                                               height: 20,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2),
                                             ),
                                           ),
                                         );
@@ -1766,7 +1772,8 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                                       customBorder: const CircleBorder(),
                                       child: const Padding(
                                         padding: EdgeInsets.all(4),
-                                        child: Icon(Icons.close, size: 14, color: Colors.white),
+                                        child: Icon(Icons.close,
+                                            size: 14, color: Colors.white),
                                       ),
                                     ),
                                   ),
@@ -1778,9 +1785,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                 ),
                 Text(
                   'Helps mechanics diagnose before arriving on site',
-                  style: TextStyle(
-                      color: _captionColor,
-                      fontSize: 12),
+                  style: TextStyle(color: _captionColor, fontSize: 12),
                 ),
                 const SizedBox(height: 20),
                 _sectionTitle('Notes (required)'),
@@ -1800,9 +1805,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                       child: Text(
                         '$currentLength / ${maxLength ?? 500}',
                         textAlign: TextAlign.right,
-                        style: TextStyle(
-                            color: _captionColor,
-                            fontSize: 12),
+                        style: TextStyle(color: _captionColor, fontSize: 12),
                       ),
                     );
                   },
@@ -1964,9 +1967,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                     : 'Mechanics will be notified and can quote on your scheduled window.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: _captionColor,
-                    fontSize: _captionSize,
-                    height: 1.35),
+                    color: _captionColor, fontSize: _captionSize, height: 1.35),
               ),
             ],
           ),

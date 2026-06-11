@@ -147,7 +147,7 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
     }
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     final token = context.read<AuthViewModel>().session?.accessToken;
     if (token == null || token.trim().isEmpty) {
       setState(() {
@@ -159,10 +159,14 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
       return;
     }
 
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    } else {
+      setState(() => _error = null);
+    }
 
     try {
       final res = await _api.fetchNotifications(accessToken: token, page: 1, limit: 20);
@@ -232,6 +236,139 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
       }
       _unreadCountFromApi = 0;
     });
+  }
+
+  Widget _buildNotificationBody() {
+    if (_error != null) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 48),
+        children: [
+          const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 28),
+          const SizedBox(height: 10),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: _bodyMuted, fontSize: 13, height: 1.35),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: ElevatedButton(
+              onPressed: _load,
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.black),
+              child: const Text('Retry'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_rows.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 24),
+        children: const [
+          SizedBox(height: 120),
+          Center(
+            child: Text(
+              'All caught up',
+              style: TextStyle(color: _bodyMuted, fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 24),
+      itemCount: _rows.length,
+      separatorBuilder: (_, __) => const Divider(height: 1, thickness: 1, color: _divider),
+      itemBuilder: (context, i) => _notificationRow(_rows[i]),
+    );
+  }
+
+  Widget _notificationRow(_NotifRowModel r) {
+    final opening = _openingNotificationId == r.id;
+    return Material(
+      color: r.unread ? _unreadRowBg : _bg,
+      child: InkWell(
+        onTap: _openingNotificationId != null && !opening ? null : () => _onNotificationTap(r),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              r.leading,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.headline,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      r.detail,
+                      style: const TextStyle(
+                        color: _bodyMuted,
+                        fontSize: 13,
+                        height: 1.4,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    if (r.when.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        r.when,
+                        style: TextStyle(
+                          color: AppColors.textMuted.withValues(alpha: 0.95),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (opening)
+                const Padding(
+                  padding: EdgeInsets.only(top: 2),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                )
+              else if (r.unread)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -318,127 +455,12 @@ class _FleetNotificationsOverlayState extends State<FleetNotificationsOverlay> {
               Expanded(
                 child: _loading
                     ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                    : (_error != null)
-                        ? Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 28),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    _error!,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: _bodyMuted, fontSize: 13, height: 1.35),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  ElevatedButton(
-                                    onPressed: _load,
-                                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.black),
-                                    child: const Text('Retry'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        : (_rows.isEmpty)
-                            ? const Center(
-                                child: Text(
-                                  'All caught up',
-                                  style: TextStyle(color: _bodyMuted, fontSize: 13, fontWeight: FontWeight.w600),
-                                ),
-                              )
-                            : ListView.separated(
-                                padding: const EdgeInsets.only(bottom: 24),
-                                itemCount: _rows.length,
-                                separatorBuilder: (_, __) => const Divider(height: 1, thickness: 1, color: _divider),
-                                itemBuilder: (context, i) {
-                                  final r = _rows[i];
-                                  final opening = _openingNotificationId == r.id;
-                                  return Material(
-                                    color: r.unread ? _unreadRowBg : _bg,
-                                    child: InkWell(
-                                      onTap: _openingNotificationId != null && !opening
-                                          ? null
-                                          : () => _onNotificationTap(r),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                                        child: Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            r.leading,
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    r.headline,
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 15,
-                                                      fontWeight: FontWeight.w800,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  Text(
-                                                    r.detail,
-                                                    style: const TextStyle(
-                                                      color: _bodyMuted,
-                                                      fontSize: 13,
-                                                      height: 1.4,
-                                                      fontWeight: FontWeight.w400,
-                                                    ),
-                                                  ),
-                                                  if (r.when.trim().isNotEmpty) ...[
-                                                    const SizedBox(height: 8),
-                                                    Text(
-                                                      r.when,
-                                                      style: TextStyle(
-                                                        color: AppColors.textMuted.withValues(alpha: 0.95),
-                                                        fontSize: 11,
-                                                        fontWeight: FontWeight.w500,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ],
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            if (opening)
-                                              const Padding(
-                                                padding: EdgeInsets.only(top: 2),
-                                                child: SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    color: AppColors.primary,
-                                                  ),
-                                                ),
-                                              )
-                                            else if (r.unread)
-                                              Padding(
-                                                padding: const EdgeInsets.only(top: 6),
-                                                child: Container(
-                                                  width: 8,
-                                                  height: 8,
-                                                  decoration: const BoxDecoration(
-                                                    color: AppColors.primary,
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                ),
-                                              )
-                                            else
-                                              const SizedBox(width: 8),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
+                    : RefreshIndicator(
+                        color: AppColors.primary,
+                        backgroundColor: const Color(0xFF1A1A1A),
+                        onRefresh: () => _load(silent: true),
+                        child: _buildNotificationBody(),
+                      ),
               ),
             ],
           ),

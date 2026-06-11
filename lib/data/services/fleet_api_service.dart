@@ -329,13 +329,44 @@ class FleetApiService {
   }
 
   /// Fleet approves completed work / releases payment: `PATCH /api/v1/jobs/:jobId/complete/approve`
+  ///
+  /// - Card pay: pass [paymentMethodId] (saved card Mongo `_id`, NOT `pm_…`) and [finalAmount].
+  /// - Hand Cash: pass only [finalAmount] (omit [paymentMethodId]). See `payment.md` §5.
   Future<Map<String, dynamic>> approveJobCompletion({
     required String accessToken,
     required String jobId,
+    String? paymentMethodId,
+    num? finalAmount,
   }) async {
     final id = jobId.trim();
     final uri = Uri.parse('$_baseUrl${ApiConstants.jobsPath}/${Uri.encodeComponent(id)}/complete/approve');
+    final body = <String, dynamic>{};
+    final pm = paymentMethodId?.trim();
+    if (pm != null && pm.isNotEmpty) {
+      body['paymentMethodId'] = pm;
+    }
+    if (finalAmount != null) {
+      body['finalAmount'] = finalAmount;
+    }
     final res = await _client.patch(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(body),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to approve completion');
+  }
+
+  /// `POST /api/v1/billing/stripe/setup-intent` — start adding a card.
+  /// Returns `{ clientSecret, setupIntentId, ... }` inside `data`.
+  Future<Map<String, dynamic>> createStripeSetupIntent({
+    required String accessToken,
+  }) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.billingStripeSetupIntentPath}');
+    final res = await _client.post(
       uri,
       headers: {
         'Accept': 'application/json',
@@ -344,7 +375,36 @@ class FleetApiService {
       },
       body: jsonEncode(<String, dynamic>{}),
     );
-    return _decodeOrThrow(res, defaultMessage: 'Failed to approve completion');
+    return _decodeOrThrow(res, defaultMessage: 'Failed to start card setup');
+  }
+
+  /// `POST /api/v1/billing/stripe/payment-methods/attach` — save card on server.
+  /// [paymentMethodId] is the Stripe `pm_…` from the SDK (NOT the Mongo `_id`).
+  Future<Map<String, dynamic>> attachStripePaymentMethod({
+    required String accessToken,
+    required String paymentMethodId,
+    bool isDefault = true,
+    String? setupIntentId,
+  }) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.billingStripePaymentMethodsAttachPath}');
+    final body = <String, dynamic>{
+      'paymentMethodId': paymentMethodId.trim(),
+      'isDefault': isDefault,
+    };
+    final sid = setupIntentId?.trim();
+    if (sid != null && sid.isNotEmpty) {
+      body['setupIntentId'] = sid;
+    }
+    final res = await _client.post(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(body),
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to save card');
   }
 
   Future<Map<String, dynamic>> createJob({

@@ -13,6 +13,7 @@ class FleetJobSummary {
     required this.statusBgHex,
     this.mechanic,
     this.pay,
+    this.payAmount,
   });
 
   /// Human-readable job code (e.g. TF-3302). Shown in UI.
@@ -34,4 +35,8 @@ class FleetJobSummary {
 
   /// Formatted payout string, e.g. "£275". Derived from finalAmount/acceptedAmount/estimatedPayout.
   final String? pay;
+
+  /// Raw numeric payout (same source as [pay]) used as `finalAmount` when fleet
+  /// approves the job via `PATCH /jobs/:id/complete/approve`.
+  final num? payAmount;
 }
