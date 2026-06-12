@@ -406,12 +406,54 @@ class FleetViewModel extends ChangeNotifier {
     if (id.isEmpty) {
       throw Exception('Invalid job');
     }
-    await _api.approveJobCompletion(
+    final usedCard = paymentMethodId != null && paymentMethodId.trim().isNotEmpty;
+    final body = await _api.approveJobCompletion(
       accessToken: token,
       jobId: id,
-      paymentMethodId: paymentMethodId,
+      paymentMethodId: usedCard ? paymentMethodId.trim() : null,
       finalAmount: finalAmount,
     );
+    if (usedCard) {
+      _assertCardPaymentSucceeded(body);
+    }
+  }
+
+  void _assertCardPaymentSucceeded(Map<String, dynamic> body) {
+    final data = body['data'];
+    if (data is! Map) {
+      throw Exception('Card payment failed — unexpected server response.');
+    }
+
+    final invoice = data['invoice'] ?? data['completionInvoice'];
+    if (invoice is! Map) {
+      throw Exception('Card payment failed — invoice was not returned.');
+    }
+
+    final payment = invoice['payment'];
+    if (payment is! Map) {
+      throw Exception('Card payment failed — payment details are missing.');
+    }
+
+    final provider = '${payment['provider'] ?? ''}'.toUpperCase();
+    if (provider == 'MANUAL') {
+      throw Exception(
+        'Card payment was not processed. Please try again or choose Hand Cash.',
+      );
+    }
+
+    final status = '${payment['status'] ?? ''}'.toUpperCase();
+    if (status != 'SUCCEEDED') {
+      final lastError = payment['lastError'];
+      if (lastError is String && lastError.trim().isNotEmpty) {
+        throw Exception(lastError.trim());
+      }
+      throw Exception('Card payment failed ($status). Please try another card.');
+    }
+
+    final invoiceStatus = '${invoice['status'] ?? ''}'.toUpperCase();
+    if (invoiceStatus != 'PAID') {
+      throw Exception('Payment did not complete. Please try another card.');
+    }
   }
 
   /// Runs `payment.md` §4 Steps 2–4: SetupIntent → Stripe PaymentSheet → attach.

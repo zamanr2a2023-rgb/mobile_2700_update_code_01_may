@@ -30,7 +30,8 @@ class _ForgetScreenState extends State<ForgetScreen> {
     return InputDecoration(
       isDense: true,
       hintText: hint,
-      hintStyle: const TextStyle(color: AppColors.textGray, fontSize: 14, fontWeight: FontWeight.w400),
+      hintStyle: const TextStyle(
+          color: AppColors.textGray, fontSize: 14, fontWeight: FontWeight.w400),
       filled: true,
       fillColor: const Color(0xFF111111),
       contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
@@ -80,7 +81,8 @@ class _ForgetScreenState extends State<ForgetScreen> {
     });
 
     try {
-      final result = await context.read<AuthRepository>().forgotPassword(email: email);
+      final result =
+          await context.read<AuthRepository>().forgotPassword(email: email);
       if (!mounted) return;
       setState(() {
         _successMessage = result.message;
@@ -114,9 +116,12 @@ class _ForgetScreenState extends State<ForgetScreen> {
                   style: IconButton.styleFrom(
                     backgroundColor: const Color(0xFF111111),
                     minimumSize: const Size(40, 40),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
-                  icon: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: AppColors.textMuted.withValues(alpha: 0.95)),
+                  icon: Icon(Icons.arrow_back_ios_new_rounded,
+                      size: 16,
+                      color: AppColors.textMuted.withValues(alpha: 0.95)),
                 ),
               ),
               const SizedBox(height: 24),
@@ -125,7 +130,11 @@ class _ForgetScreenState extends State<ForgetScreen> {
               Text(
                 sent ? 'Check your email' : 'Forgot password?',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.3),
               ),
               const SizedBox(height: 10),
               Text(
@@ -133,11 +142,15 @@ class _ForgetScreenState extends State<ForgetScreen> {
                     ? _successMessage!
                     : 'Enter your email and we\'ll send you a link to reset your password.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.95), fontSize: 13, height: 1.45),
+                style: TextStyle(
+                    color: AppColors.textMuted.withValues(alpha: 0.95),
+                    fontSize: 13,
+                    height: 1.45),
               ),
               const SizedBox(height: 32),
               if (sent) ...[
-                const Icon(Icons.mark_email_read_outlined, size: 56, color: AppColors.primary),
+                const Icon(Icons.mark_email_read_outlined,
+                    size: 56, color: AppColors.primary),
                 const SizedBox(height: 28),
                 PrimaryButton(label: 'BACK TO SIGN IN', onPressed: _goBack),
               ] else ...[
@@ -161,10 +174,12 @@ class _ForgetScreenState extends State<ForgetScreen> {
                       keyboardType: TextInputType.emailAddress,
                       autocorrect: false,
                       enabled: !_submitting,
-                      style: const TextStyle(color: AppColors.textGray, fontSize: 14),
+                      style: const TextStyle(
+                          color: AppColors.textGray, fontSize: 14),
                       decoration: _fieldDecoration(
                         hint: 'you@company.co.uk',
-                        prefix: const Icon(Icons.email_outlined, size: 20, color: AppColors.textGray),
+                        prefix: const Icon(Icons.email_outlined,
+                            size: 20, color: AppColors.textGray),
                       ),
                       onSubmitted: (_) => _submit(),
                     ),
@@ -174,7 +189,10 @@ class _ForgetScreenState extends State<ForgetScreen> {
                   const SizedBox(height: 12),
                   Text(
                     _error!,
-                    style: const TextStyle(color: AppColors.error, fontSize: 12, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                        color: AppColors.error,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600),
                   ),
                 ],
                 const SizedBox(height: 24),
@@ -188,7 +206,10 @@ class _ForgetScreenState extends State<ForgetScreen> {
                     onPressed: _submitting ? null : _goBack,
                     child: const Text(
                       'Back to Sign in',
-                      style: TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700),
                     ),
                   ),
                 ),
@@ -223,7 +244,8 @@ class _ForgetScreenState extends State<ForgetScreen> {
             child: Transform.rotate(
               angle: -math.pi / -2,
               alignment: Alignment.center,
-              child: const Icon(Icons.build_outlined, size: 44, color: _kWrench),
+              child:
+                  const Icon(Icons.build_outlined, size: 44, color: _kWrench),
             ),
           ),
         ),
@@ -232,10 +254,17 @@ class _ForgetScreenState extends State<ForgetScreen> {
           fit: BoxFit.scaleDown,
           child: Text.rich(
             TextSpan(
-              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 1.2, height: 1.0),
+              style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.2,
+                  height: 1.0),
               children: const [
-                TextSpan(text: 'TRUCK', style: TextStyle(color: AppColors.textWhite)),
-                TextSpan(text: 'FIX', style: TextStyle(color: AppColors.primary)),
+                TextSpan(
+                    text: 'TRUCK',
+                    style: TextStyle(color: AppColors.textWhite)),
+                TextSpan(
+                    text: 'FIX', style: TextStyle(color: AppColors.primary)),
               ],
             ),
           ),

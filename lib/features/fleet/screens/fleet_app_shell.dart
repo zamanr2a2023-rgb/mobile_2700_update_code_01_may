@@ -660,10 +660,13 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
   bool _approveLoading = false;
   String? _approveErr;
 
-  /// Selected saved-card Mongo `_id`. When `null`, Hand Cash is used.
+  /// `true` only when the user explicitly chose Hand Cash.
+  bool _payWithHandCash = false;
+  /// Selected saved-card Mongo `_id` when [_payWithHandCash] is false.
   String? _selectedCardId;
   bool _addingCard = false;
   bool _initialSelectionApplied = false;
+  bool _userChosePayment = false;
 
   static const Color _sheetBg = Color(0xFF0E0E0E);
   static const Color _approveGreen = Color(0xFF4ADE80);
@@ -686,8 +689,10 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
   }
 
   void _applyDefaultCardSelection(List<FleetBillingPaymentMethod> cards) {
-    if (_initialSelectionApplied) return;
+    if (_initialSelectionApplied || _userChosePayment) return;
     if (cards.isEmpty) {
+      _payWithHandCash = true;
+      _selectedCardId = null;
       _initialSelectionApplied = true;
       return;
     }
@@ -698,8 +703,20 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
         break;
       }
     }
+    _payWithHandCash = false;
     _selectedCardId = (def ?? cards.first).id;
     _initialSelectionApplied = true;
+  }
+
+  String _approveErrorMessage(Object error) {
+    if (error is Exception) {
+      final text = error.toString();
+      if (text.startsWith('Exception: ')) {
+        return text.substring('Exception: '.length);
+      }
+      return text;
+    }
+    return error.toString();
   }
 
   Future<void> _onAddCard() async {
@@ -725,6 +742,8 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
               break;
             }
           }
+          _payWithHandCash = false;
+          _userChosePayment = true;
           _selectedCardId = (def ?? cards.first).id;
         });
       }
@@ -931,7 +950,27 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
                       );
                       return;
                     }
+                    final messenger = ScaffoldMessenger.of(context);
                     final vm = context.read<FleetViewModel>();
+                    final cardsLoading =
+                        vm.billingPaymentMethodsLoading || vm.stripeBillingInitLoading;
+
+                    if (!_payWithHandCash) {
+                      if (cardsLoading) {
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Payment methods are still loading. Please wait.')),
+                        );
+                        return;
+                      }
+                      final cardId = _selectedCardId?.trim();
+                      if (cardId == null || cardId.isEmpty) {
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Select a card or choose Hand Cash to continue.')),
+                        );
+                        return;
+                      }
+                    }
+
                     setState(() {
                       _approveLoading = true;
                       _approveErr = null;
@@ -939,7 +978,7 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
                     try {
                       await vm.approveJobCompletion(
                         id,
-                        paymentMethodId: _selectedCardId,
+                        paymentMethodId: _payWithHandCash ? null : _selectedCardId,
                         finalAmount: widget.payAmount,
                       );
                       if (!mounted) return;
@@ -953,10 +992,17 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
                       await vm.refresh();
                     } catch (e) {
                       if (!mounted) return;
+                      final message = _approveErrorMessage(e);
                       setState(() {
                         _approveLoading = false;
-                        _approveErr = e.toString();
+                        _approveErr = message;
                       });
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(message),
+                          backgroundColor: AppColors.red.withValues(alpha: 0.92),
+                        ),
+                      );
                     }
                   },
             style: ElevatedButton.styleFrom(
@@ -1033,25 +1079,33 @@ class _FleetCompletionReviewOverlayState extends State<_FleetCompletionReviewOve
           ),
           const SizedBox(height: 12),
           _payMethodRow(
-            selected: _selectedCardId == null,
+            selected: _payWithHandCash,
             icon: Icons.payments_rounded,
             title: 'Hand Cash',
             subtitle: 'Pay the mechanic in person',
             onTap: _approveLoading || _addingCard
                 ? null
-                : () => setState(() => _selectedCardId = null),
+                : () => setState(() {
+                      _userChosePayment = true;
+                      _payWithHandCash = true;
+                      _selectedCardId = null;
+                    }),
           ),
           for (final c in cards) ...[
             const SizedBox(height: 8),
             _payMethodRow(
-              selected: _selectedCardId == c.id,
+              selected: !_payWithHandCash && _selectedCardId == c.id,
               icon: Icons.credit_card_rounded,
               title: '${c.displayBrand} •••• ${c.last4}',
               subtitle: c.expiryLabel == '—' ? null : 'Exp ${c.expiryLabel}',
               trailingChip: c.isDefault ? 'Default' : null,
               onTap: _approveLoading || _addingCard
                   ? null
-                  : () => setState(() => _selectedCardId = c.id),
+                  : () => setState(() {
+                        _userChosePayment = true;
+                        _payWithHandCash = false;
+                        _selectedCardId = c.id;
+                      }),
             ),
           ],
           const SizedBox(height: 10),

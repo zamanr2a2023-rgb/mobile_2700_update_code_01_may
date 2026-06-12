@@ -28,12 +28,14 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _submitting = false;
   String? _error;
 
-  static InputDecoration _fieldDecoration({String? hint, Widget? prefix, Widget? suffix}) {
+  static InputDecoration _fieldDecoration(
+      {String? hint, Widget? prefix, Widget? suffix}) {
     const radius = 12.0;
     return InputDecoration(
       isDense: true,
       hintText: hint,
-      hintStyle: const TextStyle(color: AppColors.textGray, fontSize: 14, fontWeight: FontWeight.w400),
+      hintStyle: const TextStyle(
+          color: AppColors.textGray, fontSize: 14, fontWeight: FontWeight.w400),
       filled: true,
       fillColor: const Color(0xFF111111),
       contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
@@ -88,7 +90,8 @@ class _LoginScreenState extends State<LoginScreen> {
         const SnackBar(content: Text('Login successful')),
       );
 
-      final resolvedRole = context.read<AuthViewModel>().session?.role ?? widget.role;
+      final resolvedRole =
+          context.read<AuthViewModel>().session?.role ?? widget.role;
       widget.onNavigate(
         switch (resolvedRole) {
           UserRole.mechanic => 'mechanic-dashboard',
@@ -109,7 +112,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final roleLabel = widget.role == UserRole.mechanic ? 'SERVICE PROVIDER' : 'FLEET';
+    final roleLabel =
+        widget.role == UserRole.mechanic ? 'SERVICE PROVIDER' : 'FLEET';
     return Scaffold(
       backgroundColor: const Color(0xFF000000),
       body: SafeArea(
@@ -241,7 +245,9 @@ class _LoginScreenState extends State<LoginScreen> {
                           setState(() => _obscurePassword = !_obscurePassword);
                         },
                         icon: Icon(
-                          _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                          _obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
                           size: 20,
                           color: AppColors.textGray,
                         ),
@@ -257,7 +263,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 14),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFF1A0B0B),
                     borderRadius: BorderRadius.circular(12),

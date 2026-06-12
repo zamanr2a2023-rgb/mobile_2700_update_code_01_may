@@ -25,7 +25,8 @@ class _TruckFixLoadingScreenState extends State<TruckFixLoadingScreen>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: TruckFixLoadingScreen.totalDuration)
+    _controller = AnimationController(
+        vsync: this, duration: TruckFixLoadingScreen.totalDuration)
       ..addStatusListener(_onAnimStatus)
       ..forward();
   }
@@ -79,7 +80,8 @@ class _TruckFixLoadingScreenState extends State<TruckFixLoadingScreen>
                         children: const [
                           TextSpan(
                             text: 'TRUCK',
-                            style: TextStyle(color: TruckFixLoadingScreen.accent),
+                            style:
+                                TextStyle(color: TruckFixLoadingScreen.accent),
                           ),
                           TextSpan(
                             text: 'FIX',
@@ -96,7 +98,8 @@ class _TruckFixLoadingScreenState extends State<TruckFixLoadingScreen>
                     child: Container(
                       width: 120,
                       height: 1,
-                      color: TruckFixLoadingScreen.accent.withValues(alpha: 0.3),
+                      color:
+                          TruckFixLoadingScreen.accent.withValues(alpha: 0.3),
                     ),
                   ),
                   const SizedBox(height: 36),
@@ -116,7 +119,8 @@ class _TruckFixLoadingScreenState extends State<TruckFixLoadingScreen>
                             child: AnimatedBuilder(
                               animation: _controller,
                               builder: (context, _) {
-                                final wobble = math.sin(_controller.value * 2 * math.pi * 2) *
+                                final wobble = math.sin(
+                                        _controller.value * 2 * math.pi * 2) *
                                     (8 * math.pi / 180);
                                 return Transform.rotate(
                                   angle: wobble,
@@ -146,11 +150,13 @@ class _TruckFixLoadingScreenState extends State<TruckFixLoadingScreen>
                             duration: const Duration(milliseconds: 400),
                             curve: Curves.easeOut,
                             child: AnimatedSlide(
-                              offset: show ? Offset.zero : const Offset(0, 0.35),
+                              offset:
+                                  show ? Offset.zero : const Offset(0, 0.35),
                               duration: const Duration(milliseconds: 400),
                               curve: Curves.easeOut,
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8),
                                 child: Text(
                                   words[i],
                                   style: GoogleFonts.barlowCondensed(
@@ -205,7 +211,8 @@ class _GearPainter extends CustomPainter {
   Path _buildGearPath() {
     final seg = (2 * math.pi) / _n;
     final p = Path();
-    Offset P(double r, double a) => Offset(_cx + r * math.cos(a), _cy + r * math.sin(a));
+    Offset P(double r, double a) =>
+        Offset(_cx + r * math.cos(a), _cy + r * math.sin(a));
 
     for (var i = 0; i < _n; i++) {
       final base = i * seg - math.pi / 2;
@@ -310,6 +317,6 @@ class _GearPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GearPainter oldDelegate) => oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _GearPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
-

@@ -10,6 +10,8 @@ abstract final class ApiConstants {
 
   static const String authBaseUrl = 'https://api.thetruckfix.co.uk';
   static const String usersBaseUrl = 'https://api.thetruckfix.co.uk';
+  //  static const String authBaseUrl = 'http://103.208.183.248:5000';
+  // static const String usersBaseUrl = 'http://103.208.183.248:5000';
 
   static const String authLoginPath = '/api/v1/auth/login';
   static const String authLogoutPath = '/api/v1/auth/logout';

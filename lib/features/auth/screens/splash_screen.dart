@@ -62,11 +62,14 @@ class SplashScreen extends StatelessWidget {
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(28),
                                     child: BackdropFilter(
-                                      filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                                      filter: ImageFilter.blur(
+                                          sigmaX: 14, sigmaY: 14),
                                       child: DecoratedBox(
                                         decoration: BoxDecoration(
-                                          color: _kAccentYellow.withValues(alpha: 0.12),
-                                          borderRadius: BorderRadius.circular(28),
+                                          color: _kAccentYellow.withValues(
+                                              alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(28),
                                         ),
                                       ),
                                     ),
@@ -82,7 +85,8 @@ class SplashScreen extends StatelessWidget {
                                     borderRadius: BorderRadius.circular(28),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: _kAccentYellow.withValues(alpha: 0.30),
+                                        color: _kAccentYellow.withValues(
+                                            alpha: 0.30),
                                         blurRadius: 20,
                                         spreadRadius: 0,
                                       ),
@@ -140,7 +144,10 @@ class SplashScreen extends StatelessWidget {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Container(height: 1, width: 56, color: _kAccentYellow.withValues(alpha: 0.5)),
+                              Container(
+                                  height: 1,
+                                  width: 56,
+                                  color: _kAccentYellow.withValues(alpha: 0.5)),
                               const Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 14),
                                 child: Text(
@@ -153,7 +160,10 @@ class SplashScreen extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              Container(height: 1, width: 56, color: _kAccentYellow.withValues(alpha: 0.5)),
+                              Container(
+                                  height: 1,
+                                  width: 56,
+                                  color: _kAccentYellow.withValues(alpha: 0.5)),
                             ],
                           ),
                           const SizedBox(height: 24),
@@ -191,7 +201,8 @@ class SplashScreen extends StatelessWidget {
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              shadowColor: _kAccentYellow.withValues(alpha: 0.35),
+                              shadowColor:
+                                  _kAccentYellow.withValues(alpha: 0.35),
                             ),
                             child: const Text(
                               'GET STARTED →',
@@ -209,7 +220,8 @@ class SplashScreen extends StatelessWidget {
                       TextButton(
                         style: TextButton.styleFrom(
                           foregroundColor: const Color(0xFFFFFFFF),
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 8, horizontal: 4),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
@@ -263,7 +275,8 @@ class _SplashDiagonalStripesPainter extends CustomPainter {
     // Equivalent to `repeating-linear-gradient(45deg, yellow 0..2px, transparent ..28px)`.
     const double spacing = 28;
     for (double x = -size.height; x < size.width + size.height; x += spacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x + size.height, size.height), paint);
+      canvas.drawLine(
+          Offset(x, 0), Offset(x + size.height, size.height), paint);
     }
   }
 
