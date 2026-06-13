@@ -73,4 +73,12 @@ class AuthViewModel extends ChangeNotifier {
     registrationRole = null;
     notifyListeners();
   }
+
+  /// Apply a session returned from register/login APIs (already persisted).
+  Future<void> adoptSession(Session session) async {
+    _session = session;
+    registrationRole = null;
+    notifyListeners();
+    unawaited(DeviceTokenSyncService.instance.syncWithSession(session));
+  }
 }

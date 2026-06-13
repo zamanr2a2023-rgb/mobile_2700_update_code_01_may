@@ -26,8 +26,8 @@ abstract class AuthRepository {
   /// `POST /api/v1/auth/forgot-password` — sends reset instructions to [email].
   Future<ForgotPasswordResult> forgotPassword({required String email});
 
-  /// Fleet operator registration.
-  Future<void> registerFleetOperator({
+  /// Fleet operator registration — returns session when API issues tokens.
+  Future<Session> registerFleetOperator({
     required String companyName,
     required String contactPerson,
     required String email,
@@ -114,14 +114,20 @@ class MemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> registerFleetOperator({
+  Future<Session> registerFleetOperator({
     required String companyName,
     required String contactPerson,
     required String email,
     required String password,
     required String confirmPassword,
   }) async {
-    // No-op for prototype mode.
+    final s = Session(
+      email: email,
+      role: UserRole.fleet,
+      displayName: contactPerson.trim(),
+    );
+    await saveSession(s);
+    return s;
   }
 
   @override

@@ -2433,11 +2433,16 @@ class _FleetDashboardState extends State<_FleetDashboard> {
   Widget build(BuildContext context) {
     final vm = context.watch<FleetViewModel>();
     const companyName = 'Logistix Transport';
-    final displayJobs = widget.jobs.isNotEmpty ? widget.jobs : _kDashboardDemoJobs;
-    final activeJobCount = widget.jobs.length;
+    final displayJobs = vm.hasLoadedOnce
+        ? widget.jobs
+        : (widget.jobs.isNotEmpty ? widget.jobs : _kDashboardDemoJobs);
+    final activeJobCount = vm.hasLoadedOnce
+        ? widget.jobs.length
+        : (widget.jobs.isNotEmpty ? widget.jobs.length : _kDashboardDemoJobs.length);
     final completedJobCount = vm.hasLoadedOnce ? vm.completedJobs.length : _kFleetCompletedDemoJobs.length;
     FleetJobSummary? awaitingJob;
-    for (final j in displayJobs) {
+    final jobsForAwaitingScan = vm.hasLoadedOnce ? widget.jobs : displayJobs;
+    for (final j in jobsForAwaitingScan) {
       if (j.status.toUpperCase().contains('AWAITING')) {
         awaitingJob = j;
         break;
@@ -3301,7 +3306,31 @@ class _FleetDashboardState extends State<_FleetDashboard> {
             ],
           ),
           const SizedBox(height: 16),
-          if (_showActiveJobs) ...displayJobs.map(activeJobCard),
+          if (_showActiveJobs)
+            ...(vm.hasLoadedOnce && widget.jobs.isEmpty
+                ? [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.card,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFF1E1E1E)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.work_outline_rounded, color: AppColors.textMuted, size: 18),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'No active jobs yet.',
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ]
+                : displayJobs.map(activeJobCard)),
           if (!_showActiveJobs)
             ...((vm.hasLoadedOnce)
                 ? (vm.completedJobs.isEmpty
@@ -4210,16 +4239,6 @@ class _FleetProfile extends StatelessWidget {
                       ('Email', p.email),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  _profileSection(
-                    'Billing & Payment',
-                    [
-                      ('Card Number', p.cardDisplay),
-                      ('Expiry', p.expiryDisplay),
-                      ('CCV', '•••'),
-                      ('Billing Address', p.billingAddress),
-                    ],
-                  ),
                   const SizedBox(height: 16),
                   Material(
                     color: AppColors.primary,
@@ -4465,11 +4484,6 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
   late final TextEditingController _phone;
   late final TextEditingController _email;
 
-  late final TextEditingController _cardNumber;
-  late final TextEditingController _expiry;
-  late final TextEditingController _ccv;
-  late final TextEditingController _billingAddress;
-
   static const Color _bg = Color(0xFF080808);
   static const Color _fieldFill = Color(0xFF111111);
   static const Color _labelGray = Color(0xFF6B7280);
@@ -4489,11 +4503,6 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     _role = TextEditingController(text: 'Fleet Manager');
     _phone = TextEditingController(text: '+44 7712 345 678');
     _email = TextEditingController(text: 'john@logistix.co.za');
-
-    _cardNumber = TextEditingController(text: '4242424242424242');
-    _expiry = TextEditingController(text: '09 / 28');
-    _ccv = TextEditingController(text: '');
-    _billingAddress = TextEditingController(text: '123 Logistics Ave, Johannesburg');
   }
 
   @override
@@ -4519,9 +4528,6 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     _phone.text = clean(p.contactPhone);
     _email.text = clean(p.email);
 
-    // Payment summary in profile is display-only (masked). Keep demo input for card fields.
-    _billingAddress.text = clean(p.billingAddress);
-
     _didPrefillFromApi = true;
   }
 
@@ -4530,6 +4536,7 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     setState(() => _saving = true);
     final vm = context.read<FleetViewModel>();
     try {
+      final existingBill = vm.meProfile?.billingAddress.trim() ?? '';
       await vm.updateFleetOperatorProfile(
         companyName: _companyName.text,
         regNumber: _regNumber.text,
@@ -4539,7 +4546,7 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
         contactRole: _role.text,
         contactPhone: _phone.text,
         email: _email.text,
-        billingAddress: _billingAddress.text,
+        billingAddress: existingBill == '—' ? '' : existingBill,
       );
       if (!mounted) return;
       widget.onSave();
@@ -4561,10 +4568,6 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     _role.dispose();
     _phone.dispose();
     _email.dispose();
-    _cardNumber.dispose();
-    _expiry.dispose();
-    _ccv.dispose();
-    _billingAddress.dispose();
     super.dispose();
   }
 
@@ -4760,74 +4763,6 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
                     const SizedBox(height: 12),
                     _fieldLabel('Email'),
                     _textField(controller: _email, keyboardType: TextInputType.emailAddress),
-                    const SizedBox(height: 20),
-                    const Divider(height: 1, color: AppColors.border),
-                    const SizedBox(height: 20),
-                    _sectionHeader('Billing & Payment'),
-                    const SizedBox(height: 12),
-                    _fieldLabel('Card Number'),
-                    _textField(
-                      controller: _cardNumber,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(16),
-                      ],
-                      suffix: Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: Icon(Icons.lock_outline_rounded, color: AppColors.textHint.withValues(alpha: 0.75), size: 18),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _fieldLabel('Expiry'),
-                              _textField(controller: _expiry),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _fieldLabel('CCV'),
-                              _textField(
-                                controller: _ccv,
-                                obscure: true,
-                                hintText: '•••',
-                                suffix: Padding(
-                                  padding: const EdgeInsets.only(right: 12),
-                                  child: Icon(Icons.lock_outline_rounded, color: AppColors.textHint.withValues(alpha: 0.75), size: 18),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _fieldLabel('Billing Address'),
-                    _textField(controller: _billingAddress),
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.textHint.withValues(alpha: 0.8)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Card details are encrypted and stored securely. TruckFix never stores raw card data.',
-                            style: TextStyle(color: AppColors.textHint.withValues(alpha: 0.85), fontSize: 10, height: 1.35),
-                          ),
-                        ),
-                      ],
-                    ),
                     const SizedBox(height: 16),
                   ],
                 ),
@@ -5968,130 +5903,24 @@ class _FleetPaymentOverlay extends StatefulWidget {
 }
 
 class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
-  final List<_FleetPayCardRow> _localCards = [];
-  int _localDefaultIndex = 0;
-  bool _showAddCard = false;
   /// While non-null, the API-backed row with this method id shows a busy state.
   String? _apiPaymentBusyId;
+  bool _addingCard = false;
 
-  final _addCardFormKey = GlobalKey<FormState>();
-  late final TextEditingController _addCardNumber;
-  late final TextEditingController _addExpiry;
-  late final TextEditingController _addCvc;
-  late final TextEditingController _addCardholder;
-
-  static const _fieldFill = Color(0xFF1A1A1A);
-  static const _fieldBorder = Color(0xFF2A2A2A);
-
-  @override
-  void initState() {
-    super.initState();
-    _addCardNumber = TextEditingController();
-    _addExpiry = TextEditingController();
-    _addCvc = TextEditingController();
-    _addCardholder = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _addCardNumber.dispose();
-    _addExpiry.dispose();
-    _addCvc.dispose();
-    _addCardholder.dispose();
-    super.dispose();
-  }
-
-  String _cardDigitsOnly(String s) => s.replaceAll(RegExp(r'\D'), '');
-
-  String _inferCardBrand(String digits) {
-    if (digits.isEmpty) return 'Card';
-    switch (digits[0]) {
-      case '4':
-        return 'Visa';
-      case '5':
-        return 'Mastercard';
-      case '3':
-        return 'Amex';
-      case '6':
-        return 'Discover';
-      default:
-        return 'Card';
-    }
-  }
-
-  InputDecoration _addCardDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: AppColors.textHint.withValues(alpha: 0.9), fontSize: 14),
-      filled: true,
-      fillColor: _fieldFill,
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: _fieldBorder, width: 1),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: AppColors.primary.withValues(alpha: 0.55), width: 1),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: AppColors.red.withValues(alpha: 0.7), width: 1),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: AppColors.red, width: 1),
-      ),
-    );
-  }
-
-  Widget _addCardFieldLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: AppColors.textMuted,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.9,
-        ),
-      ),
-    );
-  }
-
-  void _saveNewCard() {
-    if (_addCardFormKey.currentState?.validate() != true) return;
-    final digits = _cardDigitsOnly(_addCardNumber.text);
-    final last4 = digits.substring(digits.length - 4);
-    final brand = _inferCardBrand(digits);
-    final expiry = _addExpiry.text.trim();
-    setState(() {
-      _localCards.add(_FleetPayCardRow(brand: brand, last4: last4, expiry: expiry));
-      if (_localCards.length == 1) _localDefaultIndex = 0;
-      _showAddCard = false;
-    });
-    _addCardNumber.clear();
-    _addExpiry.clear();
-    _addCvc.clear();
-    _addCardholder.clear();
+  Future<void> _openStripeAddCard() async {
+    if (_addingCard) return;
+    final ctx = context;
+    final vm = ctx.read<FleetViewModel>();
+    final messenger = ScaffoldMessenger.maybeOf(ctx);
+    setState(() => _addingCard = true);
+    final result = await vm.addStripeCard();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Card saved')));
-  }
-
-  void _removeLocalAt(int i) {
-    setState(() {
-      _localCards.removeAt(i);
-      if (_localCards.isEmpty) {
-        _localDefaultIndex = 0;
-      } else if (_localDefaultIndex >= _localCards.length) {
-        _localDefaultIndex = _localCards.length - 1;
-      } else if (i < _localDefaultIndex) {
-        _localDefaultIndex--;
-      }
-    });
+    setState(() => _addingCard = false);
+    if (result == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Card saved')));
+    } else if (result != 'CANCELED') {
+      messenger?.showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   Future<void> _onApiPaymentSetDefault(BuildContext ctx, FleetViewModel vm, String methodId) async {
@@ -6133,7 +5962,7 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
     return Material(
       color: Colors.black,
       child: SafeArea(
-        child: _showAddCard ? _buildAddCardScreen() : _buildPaymentListScreen(vm),
+        child: _buildPaymentListScreen(vm),
       ),
     );
   }
@@ -6142,7 +5971,6 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
     final api = vm.billingPaymentMethods;
     final loading = vm.billingPaymentMethodsLoading;
     final err = vm.billingPaymentMethodsError;
-    final apiHasDefault = api.any((m) => m.isDefault);
 
     final listTiles = <Widget>[
       if (vm.stripeBillingInitLoading)
@@ -6208,12 +6036,12 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
             ),
           ),
         ),
-      if (loading && api.isEmpty && _localCards.isEmpty)
+      if (loading && api.isEmpty)
         const Padding(
           padding: EdgeInsets.only(top: 48),
           child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
         )
-      else if (!loading && err == null && api.isEmpty && _localCards.isEmpty)
+      else if (!loading && err == null && api.isEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 24, bottom: 8),
           child: Text(
@@ -6237,21 +6065,11 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
           ),
         );
       }),
-      for (var j = 0; j < _localCards.length; j++) ...[
-        _FleetPaymentCardTile(
-          row: _localCards[j],
-          isDefault: !apiHasDefault && j == _localDefaultIndex,
-          onSetDefault:
-              apiHasDefault || _localCards.length <= 1 || j == _localDefaultIndex ? null : () => setState(() => _localDefaultIndex = j),
-          onRemove: () => _removeLocalAt(j),
-        ),
-        const SizedBox(height: 12),
-      ],
       Material(
         color: const Color(0xFF121212),
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
-          onTap: () => setState(() => _showAddCard = true),
+          onTap: _addingCard ? null : _openStripeAddCard,
           borderRadius: BorderRadius.circular(12),
           child: CustomPaint(
             painter: _FleetDashedBorderPainter(
@@ -6263,23 +6081,29 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 22),
               alignment: Alignment.center,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add_rounded, color: AppColors.textMuted, size: 22),
-                  const SizedBox(width: 8),
-                  Text(
-                    'ADD NEW CARD',
-                    style: TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.8,
+              child: _addingCard
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_rounded, color: AppColors.textMuted, size: 22),
+                        const SizedBox(width: 8),
+                        Text(
+                          'ADD NEW CARD',
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
             ),
           ),
         ),
@@ -6309,198 +6133,6 @@ class _FleetPaymentOverlayState extends State<_FleetPaymentOverlay> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildAddCardScreen() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 20, 12),
-          child: Row(
-            children: [
-              _fleetCircleBackButton(onPressed: () => setState(() => _showAddCard = false)),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Payment Methods',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 18, letterSpacing: -0.2),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF121212),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.add_rounded, color: AppColors.textMuted, size: 22),
-                    const SizedBox(width: 8),
-                    Text(
-                      'ADD NEW CARD',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0A0A0A),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.primary, width: 1),
-                ),
-                child: Form(
-                  key: _addCardFormKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'NEW CARD DETAILS',
-                        style: TextStyle(
-                          color: AppColors.primary,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      _addCardFieldLabel('CARD NUMBER'),
-                      TextFormField(
-                        controller: _addCardNumber,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(16)],
-                        style: const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: _addCardDecoration('1234 5678 9012 3456'),
-                        validator: (v) {
-                          final d = _cardDigitsOnly(v ?? '');
-                          if (d.length < 13 || d.length > 16) return 'Enter a valid card number (13–16 digits)';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _addCardFieldLabel('EXPIRY'),
-                                TextFormField(
-                                  controller: _addExpiry,
-                                  keyboardType: TextInputType.datetime,
-                                  inputFormatters: [_FleetExpiryInputFormatter(), LengthLimitingTextInputFormatter(5)],
-                                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                                  decoration: _addCardDecoration('MM/YY'),
-                                  validator: (v) {
-                                    final t = (v ?? '').trim();
-                                    if (!RegExp(r'^\d{2}/\d{2}$').hasMatch(t)) return 'Use MM/YY';
-                                    final mm = int.tryParse(t.substring(0, 2));
-                                    if (mm == null || mm < 1 || mm > 12) return 'Invalid month';
-                                    return null;
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _addCardFieldLabel('CVC'),
-                                TextFormField(
-                                  controller: _addCvc,
-                                  obscureText: true,
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)],
-                                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                                  decoration: _addCardDecoration('123'),
-                                  validator: (v) {
-                                    final l = (v ?? '').trim().length;
-                                    if (l < 3 || l > 4) return 'Invalid CVC';
-                                    return null;
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _addCardFieldLabel('CARDHOLDER NAME'),
-                      TextFormField(
-                        controller: _addCardholder,
-                        textCapitalization: TextCapitalization.words,
-                        style: const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: _addCardDecoration('John Smith'),
-                        validator: (v) {
-                          if ((v ?? '').trim().length < 2) return 'Enter cardholder name';
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 22),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: _saveNewCard,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: const StadiumBorder(),
-                          ),
-                          child: const Text(
-                            'SAVE CARD',
-                            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, letterSpacing: 0.9),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Inserts `/` after MM when typing expiry (MM/YY).
-class _FleetExpiryInputFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-    var t = newValue.text.replaceAll(RegExp(r'[^\d]'), '');
-    if (t.length > 4) t = t.substring(0, 4);
-    final buf = StringBuffer();
-    for (var i = 0; i < t.length; i++) {
-      if (i == 2) buf.write('/');
-      buf.write(t[i]);
-    }
-    final s = buf.toString();
-    return TextEditingValue(
-      text: s,
-      selection: TextSelection.collapsed(offset: s.length),
     );
   }
 }

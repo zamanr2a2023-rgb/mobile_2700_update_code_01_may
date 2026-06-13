@@ -113,6 +113,9 @@ class JobsApiException implements Exception {
     if (lower.contains('registration') && lower.contains('required')) {
       return 'Please enter the vehicle registration.';
     }
+    if (lower.contains('bank card') || lower.contains('complete your profile before posting')) {
+      return 'Please add a bank card to be able to create a job.';
+    }
 
     return msg;
   }

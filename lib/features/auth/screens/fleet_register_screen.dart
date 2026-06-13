@@ -4,6 +4,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/repositories/app_repository.dart';
 import '../../../widgets/app_input.dart';
 import '../../../widgets/buttons.dart';
+import '../viewmodel/auth_viewmodel.dart';
 
 class FleetRegisterScreen extends StatelessWidget {
   const FleetRegisterScreen({super.key, required this.onNavigate});
@@ -83,7 +84,7 @@ class _FleetRegisterBodyState extends State<_FleetRegisterBody> {
     setState(() => _submitting = true);
     try {
       final auth = context.read<AuthRepository>();
-      await auth.registerFleetOperator(
+      final session = await auth.registerFleetOperator(
         companyName: companyName,
         contactPerson: contactPerson,
         email: email,
@@ -91,7 +92,9 @@ class _FleetRegisterBodyState extends State<_FleetRegisterBody> {
         confirmPassword: confirmPassword,
       );
       if (!mounted) return;
-      widget.onNavigate('terms');
+      await context.read<AuthViewModel>().adoptSession(session);
+      if (!mounted) return;
+      widget.onNavigate('fleet-dashboard');
     } on Exception catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

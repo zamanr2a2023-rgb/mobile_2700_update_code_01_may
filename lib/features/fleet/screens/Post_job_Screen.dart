@@ -18,6 +18,7 @@ import '../../../data/services/google_places_service.dart';
 import '../../../data/services/jobs_api_service.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
 import '../../categories/job_categories.dart';
+import '../viewmodel/fleet_viewmodel.dart';
 
 /// Fleet Post Job — profile gate + full form (`PostJob` / `check.tsx`).
 class FleetPostJobScreen extends StatefulWidget {
@@ -606,6 +607,9 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
     return null;
   }
 
+  static const String _bankCardRequiredMessage =
+      'Please add a bank card to be able to create a job.';
+
   Future<void> _submitJob() async {
     if (_submittingJob) return;
     if (_jobCategoryLabel == null || _jobCategoryLabel!.trim().isEmpty) {
@@ -636,6 +640,15 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
           content: Text(
               'Please describe the problem in Notes before posting your job.'),
         ),
+      );
+      return;
+    }
+    final fleetVm = context.read<FleetViewModel>();
+    await fleetVm.loadBillingPaymentMethods(silent: true);
+    if (!mounted) return;
+    if (fleetVm.billingPaymentMethods.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_bankCardRequiredMessage)),
       );
       return;
     }

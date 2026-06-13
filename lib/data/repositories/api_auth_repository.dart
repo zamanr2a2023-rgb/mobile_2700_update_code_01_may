@@ -139,6 +139,21 @@ class ApiAuthRepository implements AuthRepository {
     // - { token: "...", user: { email, role, name } }
     // - { data: { token, user: {...} } }
     // - { accessToken: "...", role: "fleet", email: "..." }
+    final session = _sessionFromAuthBody(
+      body,
+      fallbackEmail: email,
+      roleHint: roleHint,
+    );
+
+    await saveSession(session);
+    return session;
+  }
+
+  Session _sessionFromAuthBody(
+    Map<String, dynamic> body, {
+    required String fallbackEmail,
+    required UserRole roleHint,
+  }) {
     final data = _pickObject(body, ['data', 'result', 'payload', 'response']);
     final rootOrData = data.isNotEmpty ? data : body;
     final user = _pickObject(rootOrData, ['user', 'account', 'profile']);
@@ -160,21 +175,19 @@ class ApiAuthRepository implements AuthRepository {
         roleHint;
     final resolvedEmail = _pickString(rootOrData, ['email']) ??
         _pickString(user, ['email']) ??
-        email;
+        fallbackEmail;
     final name = _pickString(rootOrData, ['name', 'displayName']) ??
         _pickString(user, ['name', 'displayName']) ??
+        _pickString(fleetProfile, ['contactName', 'contact_name', 'companyName', 'company_name']) ??
         _pickString(mechanicProfile, ['displayName', 'display_name', 'fullName', 'full_name']);
 
-    final session = Session(
+    return Session(
       email: resolvedEmail,
       role: role,
       displayName: name ?? resolvedEmail.split('@').first,
       accessToken: accessToken,
       refreshToken: refreshToken,
     );
-
-    await saveSession(session);
-    return session;
   }
 
   @override
@@ -250,7 +263,7 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> registerFleetOperator({
+  Future<Session> registerFleetOperator({
     required String companyName,
     required String contactPerson,
     required String email,
@@ -287,6 +300,14 @@ class ApiAuthRepository implements AuthRepository {
           'Registration failed (HTTP ${res.statusCode}).';
       throw AuthException(msg);
     }
+
+    final session = _sessionFromAuthBody(
+      body,
+      fallbackEmail: email,
+      roleHint: UserRole.fleet,
+    );
+    await saveSession(session);
+    return session;
   }
 
   @override
