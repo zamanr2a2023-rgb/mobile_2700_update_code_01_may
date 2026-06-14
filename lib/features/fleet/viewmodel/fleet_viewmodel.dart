@@ -501,6 +501,9 @@ class FleetViewModel extends ChangeNotifier {
         setupIntentId: setupIntentId.isEmpty ? null : setupIntentId,
       );
       await loadBillingPaymentMethods(silent: true);
+      await loadMeProfile();
+      profileComplete = meProfile?.profileIsComplete ?? false;
+      notifyListeners();
       return null;
     } on StripeException catch (e) {
       if (e.error.code == FailureCode.Canceled) {
@@ -529,6 +532,16 @@ class FleetViewModel extends ChangeNotifier {
     if (rating < 1 || rating > 5) {
       throw Exception('Please choose a rating from 1 to 5 stars');
     }
+
+    final jobBody = await _api.fetchJob(accessToken: token, jobId: id);
+    final data = jobBody['data'];
+    final status = (data is Map ? '${data['status'] ?? ''}' : '').trim().toUpperCase();
+    if (status != 'COMPLETED') {
+      throw Exception(
+        'You can rate the mechanic after you approve the job and payment completes.',
+      );
+    }
+
     await _api.submitFleetReview(
       accessToken: token,
       jobId: id,
@@ -587,7 +600,15 @@ class FleetViewModel extends ChangeNotifier {
     } catch (e) {
       stripeBillingReady = false;
       stripeBillingConfig = null;
-      stripeBillingInitError = e.toString();
+      final msg = e.toString();
+      if (msg.toLowerCase().contains('stripe billing is not enabled')) {
+        stripeBillingInitError =
+            'Stripe is not configured on the server. Contact support or check API keys on the backend.';
+      } else if (msg.toLowerCase().contains('publishable key')) {
+        stripeBillingInitError = 'Stripe publishable key missing on server.';
+      } else {
+        stripeBillingInitError = msg.replaceFirst('Exception: ', '');
+      }
     } finally {
       if (!silent) {
         stripeBillingInitLoading = false;
@@ -685,6 +706,7 @@ class FleetViewModel extends ChangeNotifier {
     try {
       final body = await _usersApi.fetchMe(accessToken: token);
       meProfile = FleetMeProfileUi.fromApiBody(body);
+      profileComplete = meProfile?.profileIsComplete ?? false;
     } catch (e) {
       meProfileError = e.toString();
     } finally {
@@ -732,6 +754,7 @@ class FleetViewModel extends ChangeNotifier {
       await _usersApi.updateMe(accessToken: token, payload: payload);
       final body = await _usersApi.fetchMe(accessToken: token);
       meProfile = FleetMeProfileUi.fromApiBody(body);
+      profileComplete = meProfile?.profileIsComplete ?? false;
     } catch (e) {
       meProfileError = e.toString();
       rethrow;
@@ -822,6 +845,8 @@ class FleetViewModel extends ChangeNotifier {
 
       await loadFleetVehicles(silent: true);
       unawaited(ensureStripeBillingReady(silent: true));
+      unawaited(loadBillingPaymentMethods(silent: true));
+      unawaited(loadMeProfile());
     } catch (e) {
       loadError = e.toString();
     } finally {
@@ -1053,6 +1078,9 @@ class FleetViewModel extends ChangeNotifier {
     }
     tab = value;
     notifyListeners();
+    if (value == 'post-job') {
+      unawaited(tryUnlockPostJobFormFromGate());
+    }
     if (value == 'profile') {
       loadMeProfile();
     }
@@ -1106,19 +1134,76 @@ class FleetViewModel extends ChangeNotifier {
     if (tab == 'profile') loadMeProfile();
   }
 
-  void markProfileComplete() {
-    profileComplete = true;
-    tab = _returnTabAfterProfileEdit ?? 'profile';
+  Future<void> finishFleetEditProfile() async {
+    await loadBillingPaymentMethods(silent: true);
+    await loadMeProfile();
+    profileComplete = meProfile?.profileIsComplete ?? false;
+    final returnTab = _returnTabAfterProfileEdit ?? 'profile';
     _returnTabAfterProfileEdit = null;
+    if (profileComplete && returnTab == 'post-job') {
+      tab = 'post-job';
+    } else {
+      tab = returnTab;
+    }
     notifyListeners();
-    if (tab == 'profile') loadMeProfile();
   }
 
-  /// Post Job gate: advance to the full job form (same tab). Profile details remain editable under Profile.
+  void markProfileComplete() {
+    unawaited(finishFleetEditProfile());
+  }
+
+  /// Post Job gate: only unlock when backend profileCompletion.isComplete (incl. saved card).
+  Future<bool> tryUnlockPostJobFormFromGate() async {
+    await loadMeProfile();
+    await loadBillingPaymentMethods(silent: true);
+    profileComplete = meProfile?.profileIsComplete ?? false;
+    if (profileComplete) {
+      _returnTabAfterProfileEdit = null;
+      tab = 'post-job';
+      notifyListeners();
+      return true;
+    }
+    notifyListeners();
+    return false;
+  }
+
+  String? get postJobProfileBlockReason {
+    final missing = meProfile?.profileMissing ?? const [];
+    if (missing.isNotEmpty) {
+      return 'Complete your profile: ${missing.join(', ')}';
+    }
+    if (!profileComplete) {
+      return 'Add billing address and a payment card under Profile → Edit Profile, then try again.';
+    }
+    return null;
+  }
+
+  /// Label for Post Job pre-auth card row (from saved Stripe methods or profile API).
+  String get defaultPaymentCardLabel {
+    if (billingPaymentMethods.isNotEmpty) {
+      FleetBillingPaymentMethod pick = billingPaymentMethods.first;
+      for (final c in billingPaymentMethods) {
+        if (c.isDefault) {
+          pick = c;
+          break;
+        }
+      }
+      return '${pick.displayBrand} •••• ${pick.last4} · Held until completion';
+    }
+    final card = meProfile?.cardDisplay;
+    if (card != null && card.trim().isNotEmpty && card != '—') {
+      return '$card · Held until completion';
+    }
+    return 'No card saved — add one under Profile → Payment Methods';
+  }
+
+  /// @deprecated Use [tryUnlockPostJobFormFromGate].
   void unlockPostJobFormFromGate() {
-    profileComplete = true;
-    _returnTabAfterProfileEdit = null;
-    tab = 'post-job';
+    profileComplete = meProfile?.profileIsComplete ?? false;
+    if (profileComplete) {
+      _returnTabAfterProfileEdit = null;
+      tab = 'post-job';
+    }
     notifyListeners();
   }
 

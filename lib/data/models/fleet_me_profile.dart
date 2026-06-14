@@ -14,6 +14,8 @@ class FleetMeProfileUi {
     required this.cardDisplay,
     required this.expiryDisplay,
     required this.billingAddress,
+    this.profileIsComplete = false,
+    this.profileMissing = const [],
   });
 
   final String email;
@@ -27,6 +29,8 @@ class FleetMeProfileUi {
   final String cardDisplay;
   final String expiryDisplay;
   final String billingAddress;
+  final bool profileIsComplete;
+  final List<String> profileMissing;
 
   String get headerTitle {
     final c = companyName.trim();
@@ -76,6 +80,13 @@ class FleetMeProfileUi {
       bill = _str(fp['billingAddress'] ?? fp['billing_address']);
     }
 
+    final completion = _asMap(root['profileCompletion'] ?? root['profile_completion']);
+    final profileIsComplete = completion['isComplete'] == true;
+    final missingRaw = completion['missing'];
+    final profileMissing = missingRaw is List
+        ? missingRaw.map((e) => e.toString()).where((s) => s.trim().isNotEmpty).toList()
+        : const <String>[];
+
     return FleetMeProfileUi(
       email: email.isEmpty ? '—' : email,
       companyName: companyName.isEmpty ? '—' : companyName,
@@ -88,6 +99,8 @@ class FleetMeProfileUi {
       cardDisplay: cardDisplay.isEmpty ? '—' : cardDisplay,
       expiryDisplay: expiryDisplay.isEmpty ? '—' : expiryDisplay,
       billingAddress: bill.isEmpty ? '—' : bill,
+      profileIsComplete: profileIsComplete,
+      profileMissing: profileMissing,
     );
   }
 

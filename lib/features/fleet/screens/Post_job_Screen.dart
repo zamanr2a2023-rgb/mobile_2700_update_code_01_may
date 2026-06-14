@@ -14,6 +14,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/job_photo_bytes.dart';
 import '../../../data/services/google_places_service.dart';
 import '../../../data/services/jobs_api_service.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
@@ -34,8 +35,8 @@ class FleetPostJobScreen extends StatefulWidget {
   final String? prefilled;
   final VoidCallback onSubmit;
 
-  /// From the incomplete-profile gate: show the full Post Job form (emergency / schedule, vehicle, category).
-  final VoidCallback onContinueToJobForm;
+  /// Opens edit profile or unlocks the form when the backend profile is complete.
+  final Future<void> Function() onContinueToJobForm;
 
   @override
   State<FleetPostJobScreen> createState() => _FleetPostJobScreenState();
@@ -541,7 +542,9 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
     try {
       final x = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 85,
+        maxWidth: 960,
+        maxHeight: 960,
+        imageQuality: 70,
       );
       if (x != null && mounted) {
         setState(() => _jobPhotos.add(x));
@@ -566,11 +569,17 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
     try {
       List<XFile> list;
       try {
-        list = await _imagePicker.pickMultiImage(imageQuality: 85);
+        list = await _imagePicker.pickMultiImage(
+          maxWidth: 960,
+          maxHeight: 960,
+          imageQuality: 70,
+        );
       } on PlatformException {
         final single = await _imagePicker.pickImage(
           source: ImageSource.gallery,
-          imageQuality: 85,
+          maxWidth: 960,
+          maxHeight: 960,
+          imageQuality: 70,
         );
         list = single != null ? <XFile>[single] : <XFile>[];
       }
@@ -644,29 +653,46 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
       return;
     }
     final fleetVm = context.read<FleetViewModel>();
+    final auth = context.read<AuthViewModel>();
+    await fleetVm.tryUnlockPostJobFormFromGate();
+    if (!mounted) return;
+    if (!fleetVm.profileComplete) {
+      final reason = fleetVm.postJobProfileBlockReason ??
+          'Complete your profile and add a payment card under Profile → Edit Profile.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(reason)));
+      fleetVm.openFleetEditProfile(fromPostJobGate: true);
+      return;
+    }
     await fleetVm.loadBillingPaymentMethods(silent: true);
     if (!mounted) return;
     if (fleetVm.billingPaymentMethods.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(_bankCardRequiredMessage)),
       );
+      fleetVm.openFleetEditProfile(fromPostJobGate: true);
       return;
     }
     setState(() => _submittingJob = true);
     try {
-      final token = context.read<AuthViewModel>().session?.accessToken;
+      final token = auth.session?.accessToken;
       if (token == null || token.trim().isEmpty) {
         throw Exception('Missing access token. Please login again.');
       }
 
       final photoParts = <http.MultipartFile>[];
+      const maxPhotoBytes = 750 * 1024;
       for (var i = 0; i < _jobPhotos.length; i++) {
         final x = _jobPhotos[i];
-        final bytes = await x.readAsBytes();
+        var bytes = await prepareJobPhotoBytesForUpload(await x.readAsBytes());
+        if (bytes.length > maxPhotoBytes) {
+          throw Exception(
+            'Photo "${x.name}" is still too large after compression. Remove it or use a smaller image.',
+          );
+        }
         photoParts.add(
           buildJobPhotoMultipartPart(
             bytes: bytes,
-            originalName: x.name,
+            originalName: x.name.replaceAll(RegExp(r'\.[^.]+$'), '.jpg'),
             index: i,
           ),
         );
@@ -864,7 +890,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Company, contact, and billing can be added anytime under Profile. Continue below to describe your job and get mechanics responding.',
+                  'Before you can post a job, complete company details, contact info, billing address, and save a payment card in Profile.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                       color: _captionColor, fontSize: 12, height: 1.45),
@@ -888,7 +914,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                               bottom: BorderSide(color: AppColors.border)),
                         ),
                         child: const Text(
-                          'ADD ANYTIME IN PROFILE',
+                          'REQUIRED BEFORE POSTING',
                           style: TextStyle(
                             color: AppColors.primary,
                             fontSize: 12,
@@ -908,7 +934,7 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                                 'Contact Person', 'Name, role, phone, email'),
                             const Divider(height: 20, color: AppColors.border),
                             _requiredSectionRow('Billing & Payment',
-                                'Card number, expiry, CCV'),
+                                'Billing address + saved card (Profile → Edit Profile)'),
                           ],
                         ),
                       ),
@@ -1909,21 +1935,27 @@ class _FleetPostJobScreenState extends State<FleetPostJobScreen> {
                         ],
                       ),
                       const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Icon(Icons.credit_card_rounded,
-                              size: 16, color: AppColors.textMuted),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'VISA •••• 4891 · Held until completion',
-                              style: TextStyle(
-                                  color: AppColors.textMuted
-                                      .withValues(alpha: 0.95),
-                                  fontSize: 11),
-                            ),
-                          ),
-                        ],
+                      Builder(
+                        builder: (context) {
+                          final cardLabel =
+                              context.watch<FleetViewModel>().defaultPaymentCardLabel;
+                          return Row(
+                            children: [
+                              Icon(Icons.credit_card_rounded,
+                                  size: 16, color: AppColors.textMuted),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  cardLabel,
+                                  style: TextStyle(
+                                      color: AppColors.textMuted
+                                          .withValues(alpha: 0.95),
+                                      fontSize: 11),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),

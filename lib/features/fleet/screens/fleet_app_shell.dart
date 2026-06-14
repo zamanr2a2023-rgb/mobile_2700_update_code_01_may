@@ -400,7 +400,12 @@ class _FleetBody extends StatelessWidget {
           profileComplete: vm.profileComplete,
           prefilled: vm.prefilledVehicle?.label,
           onSubmit: () => vm.setTab('dashboard'),
-          onContinueToJobForm: vm.unlockPostJobFormFromGate,
+          onContinueToJobForm: () async {
+            final ok = await vm.tryUnlockPostJobFormFromGate();
+            if (!context.mounted) return;
+            if (ok) return;
+            vm.openFleetEditProfile(fromPostJobGate: true);
+          },
         );
       case 'tracking':
         return _FleetTrackingList(onOpenDetail: vm.openTrackingJobDetail);
@@ -463,7 +468,6 @@ class _FleetBody extends StatelessWidget {
         );
       case 'edit-profile':
         return _FleetEditProfile(
-          onSave: vm.markProfileComplete,
           onCancel: vm.cancelFleetEditProfile,
           openedForPostJob: vm.isEditingProfileForPostJob,
         );
@@ -4452,12 +4456,10 @@ class _FleetProfile extends StatelessWidget {
 
 class _FleetEditProfile extends StatefulWidget {
   const _FleetEditProfile({
-    required this.onSave,
     required this.onCancel,
     this.openedForPostJob = false,
   });
 
-  final VoidCallback onSave;
   final VoidCallback onCancel;
   final bool openedForPostJob;
 
@@ -4483,6 +4485,7 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
   late final TextEditingController _role;
   late final TextEditingController _phone;
   late final TextEditingController _email;
+  late final TextEditingController _billingAddress;
 
   static const Color _bg = Color(0xFF080808);
   static const Color _fieldFill = Color(0xFF111111);
@@ -4490,19 +4493,29 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
 
   bool _didPrefillFromApi = false;
   bool _saving = false;
+  bool _addingCard = false;
 
   @override
   void initState() {
     super.initState();
-    _companyName = TextEditingController(text: 'Logistix Transport (Pty) Ltd');
-    _regNumber = TextEditingController(text: '2019/223456/07');
-    _vatNumber = TextEditingController(text: '4120889456');
+    _companyName = TextEditingController();
+    _regNumber = TextEditingController();
+    _vatNumber = TextEditingController();
     _fleetSize = _fleetSizes.first;
 
-    _fullName = TextEditingController(text: 'John Khumalo');
-    _role = TextEditingController(text: 'Fleet Manager');
-    _phone = TextEditingController(text: '+44 7712 345 678');
-    _email = TextEditingController(text: 'john@logistix.co.za');
+    _fullName = TextEditingController();
+    _role = TextEditingController();
+    _phone = TextEditingController();
+    _email = TextEditingController();
+    _billingAddress = TextEditingController();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final vm = context.read<FleetViewModel>();
+      vm.loadMeProfile();
+      vm.loadBillingPaymentMethods(silent: true);
+      vm.ensureStripeBillingReady(silent: true);
+    });
   }
 
   @override
@@ -4527,8 +4540,25 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     _role.text = clean(p.contactRole);
     _phone.text = clean(p.contactPhone);
     _email.text = clean(p.email);
+    _billingAddress.text = clean(p.billingAddress);
 
     _didPrefillFromApi = true;
+  }
+
+  Future<void> _addStripeCard() async {
+    if (_addingCard) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final vm = context.read<FleetViewModel>();
+    setState(() => _addingCard = true);
+    final result = await vm.addStripeCard();
+    if (!mounted) return;
+    setState(() => _addingCard = false);
+    if (result == null) {
+      messenger?.showSnackBar(const SnackBar(content: Text('Card saved')));
+      await vm.loadMeProfile();
+    } else if (result != 'CANCELED') {
+      messenger?.showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   Future<void> _save() async {
@@ -4536,7 +4566,6 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     setState(() => _saving = true);
     final vm = context.read<FleetViewModel>();
     try {
-      final existingBill = vm.meProfile?.billingAddress.trim() ?? '';
       await vm.updateFleetOperatorProfile(
         companyName: _companyName.text,
         regNumber: _regNumber.text,
@@ -4546,11 +4575,17 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
         contactRole: _role.text,
         contactPhone: _phone.text,
         email: _email.text,
-        billingAddress: existingBill == '—' ? '' : existingBill,
+        billingAddress: _billingAddress.text,
       );
+      await vm.finishFleetEditProfile();
       if (!mounted) return;
-      widget.onSave();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
+      if (widget.openedForPostJob && !vm.profileComplete) {
+        final reason = vm.postJobProfileBlockReason ??
+            'Add a payment card below (Stripe) to finish profile setup.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(reason)));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
@@ -4568,6 +4603,7 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
     _role.dispose();
     _phone.dispose();
     _email.dispose();
+    _billingAddress.dispose();
     super.dispose();
   }
 
@@ -4763,6 +4799,73 @@ class _FleetEditProfileState extends State<_FleetEditProfile> {
                     const SizedBox(height: 12),
                     _fieldLabel('Email'),
                     _textField(controller: _email, keyboardType: TextInputType.emailAddress),
+                    const SizedBox(height: 20),
+                    const Divider(height: 1, color: AppColors.border),
+                    const SizedBox(height: 20),
+                    _sectionHeader('Billing & Payment'),
+                    const SizedBox(height: 12),
+                    _fieldLabel('Billing Address'),
+                    _textField(controller: _billingAddress, hintText: 'Street, city, postcode'),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _fieldFill,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.border2),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.credit_card_rounded, color: AppColors.primary.withValues(alpha: 0.9), size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  vm.billingPaymentMethods.isNotEmpty
+                                      ? '${vm.billingPaymentMethods.firstWhere((c) => c.isDefault, orElse: () => vm.billingPaymentMethods.first).displayBrand} •••• ${vm.billingPaymentMethods.firstWhere((c) => c.isDefault, orElse: () => vm.billingPaymentMethods.first).last4}'
+                                      : (vm.meProfile?.cardDisplay != '—'
+                                          ? vm.meProfile!.cardDisplay
+                                          : 'No saved card yet'),
+                                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: (_addingCard || _saving) ? null : _addStripeCard,
+                            icon: _addingCard
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                                  )
+                                : const Icon(Icons.add_rounded, size: 18),
+                            label: Text(
+                              vm.billingPaymentMethods.isEmpty ? 'Add payment card' : 'Add another card',
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.primary,
+                              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.45)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (vm.meProfile != null && !vm.meProfile!.profileIsComplete) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        vm.meProfile!.profileMissing.isNotEmpty
+                            ? 'Still needed: ${vm.meProfile!.profileMissing.join(', ')}'
+                            : 'Save profile details and add a payment card to unlock Post Job.',
+                        style: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.95), fontSize: 11, height: 1.35),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                   ],
                 ),

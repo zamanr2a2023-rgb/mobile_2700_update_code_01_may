@@ -1390,6 +1390,13 @@ class MechanicViewModel extends ChangeNotifier {
       final session = await _auth.getSession();
       final token = session?.accessToken;
       if (token == null || token.trim().isEmpty) return 'Not signed in';
+
+      await loadJobTrackerDetail(silent: true);
+      final status = jobTrackerDetail?.statusUpper ?? '';
+      if (status != 'AWAITING_APPROVAL' && status != 'COMPLETED') {
+        return 'You can rate the fleet operator after marking work complete.';
+      }
+
       await _api.postJobFleetReview(
         accessToken: token,
         jobId: id,

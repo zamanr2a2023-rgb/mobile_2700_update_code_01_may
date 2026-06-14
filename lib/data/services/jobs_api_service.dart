@@ -76,7 +76,14 @@ class JobsApiService {
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final raw = body['message'] is String ? body['message'] as String : null;
-      throw JobsApiException(JobsApiException.userMessage(raw, statusCode: res.statusCode));
+      final data = body['data'];
+      throw JobsApiException(
+        JobsApiException.userMessage(
+          raw,
+          statusCode: res.statusCode,
+          data: data is Map<String, dynamic> ? data : null,
+        ),
+      );
     }
 
     return body;
@@ -88,7 +95,23 @@ class JobsApiException implements Exception {
   final String message;
 
   /// Turns backend/debug text into a short message suitable for SnackBars.
-  static String userMessage(String? raw, {int? statusCode}) {
+  static String userMessage(
+    String? raw, {
+    int? statusCode,
+    Map<String, dynamic>? data,
+  }) {
+    if (statusCode == 413) {
+      return 'Photos are too large for the server. Remove some images or use fewer photos, then try again.';
+    }
+
+    final profileCompletion = data?['profileCompletion'];
+    if (profileCompletion is Map<String, dynamic>) {
+      final missing = profileCompletion['missing'];
+      if (missing is List && missing.isNotEmpty) {
+        return 'Complete your profile first: ${missing.map((e) => e.toString()).join(', ')}.';
+      }
+    }
+
     if (raw == null || raw.trim().isEmpty) {
       if (statusCode != null) {
         return 'Could not post your job (error $statusCode). Please try again.';
@@ -101,6 +124,9 @@ class JobsApiException implements Exception {
     if (debugIdx > 0) msg = msg.substring(0, debugIdx).trim();
 
     final lower = msg.toLowerCase();
+    if (lower.contains('complete your profile')) {
+      return 'Complete your profile and add a payment card under Profile → Edit Profile, then try again.';
+    }
     if (lower.contains('description') && lower.contains('required')) {
       return 'Please describe the problem in Notes before posting.';
     }
@@ -113,8 +139,8 @@ class JobsApiException implements Exception {
     if (lower.contains('registration') && lower.contains('required')) {
       return 'Please enter the vehicle registration.';
     }
-    if (lower.contains('bank card') || lower.contains('complete your profile before posting')) {
-      return 'Please add a bank card to be able to create a job.';
+    if (lower.contains('bank card')) {
+      return 'Please add a payment card under Profile → Edit Profile before posting a job.';
     }
 
     return msg;

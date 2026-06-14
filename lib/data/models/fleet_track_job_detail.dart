@@ -31,6 +31,7 @@ class FleetTrackJobDetailUi {
     required this.cancellationCurrency,
     required this.hasMechanic,
     required this.mechanicStartedJourney,
+    required this.jobStatus,
   });
 
   final String backendId;
@@ -74,6 +75,13 @@ class FleetTrackJobDetailUi {
   /// True once en-route or later (for showing contact CTA).
   final bool mechanicStartedJourney;
 
+  /// Raw backend status, e.g. `COMPLETED`, `AWAITING_APPROVAL`.
+  final String jobStatus;
+
+  bool get isJobCompleted => jobStatus == 'COMPLETED';
+
+  bool get isAwaitingFleetApproval => jobStatus == 'AWAITING_APPROVAL';
+
   static FleetTrackJobDetailUi fromApiBody(Map<String, dynamic> body) {
     final root = _unwrapData(body);
     final backendId = _str(root['_id']);
@@ -88,6 +96,7 @@ class FleetTrackJobDetailUi {
     final fromUi = _str(statusUi['label']);
     final statusLabel = fromUi.isNotEmpty ? fromUi : _str(root['status']);
     final statusTone = _str(statusUi['tone']);
+    final jobStatus = _str(root['status']).toUpperCase();
 
     final timeline = _buildTimeline(root);
 
@@ -170,6 +179,7 @@ class FleetTrackJobDetailUi {
       cancellationCurrency: cancellationCurrency.isEmpty ? currency : cancellationCurrency,
       hasMechanic: hasMechanic,
       mechanicStartedJourney: mechanicStartedJourney,
+      jobStatus: jobStatus.isEmpty ? _str(root['status']).toUpperCase() : jobStatus,
     );
   }
 

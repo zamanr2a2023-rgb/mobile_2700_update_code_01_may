@@ -4141,9 +4141,22 @@ class _MechanicJobTrackerPageState extends State<MechanicJobTrackerPage> {
                     return;
                   }
                   if (st == 3) {
-                    await Future<void>.delayed(const Duration(milliseconds: 400));
+                    await vm.loadJobTrackerDetail(silent: true);
                     if (!mounted) return;
-                    setState(() => _showReview = true);
+                    final status = vm.jobTrackerDetail?.statusUpper ?? '';
+                    if (status == 'AWAITING_APPROVAL' || status == 'COMPLETED') {
+                      await Future<void>.delayed(const Duration(milliseconds: 400));
+                      if (!mounted) return;
+                      setState(() => _showReview = true);
+                    } else {
+                      messenger?.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Work submitted. You can rate the fleet operator once the job is awaiting approval.',
+                          ),
+                        ),
+                      );
+                    }
                   }
                 },
           style: ElevatedButton.styleFrom(
