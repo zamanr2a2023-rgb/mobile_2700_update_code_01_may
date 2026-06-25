@@ -1165,7 +1165,7 @@ class _FleetTrackJobDetailViewState extends State<FleetTrackJobDetailView> with 
                         ),
                       ),
                     ],
-                    if (d.paymentStatusKey == 'released' && !_ratingSubmitted) ...[
+                    if (d.isJobCompleted && !_ratingSubmitted) ...[
                       const SizedBox(height: 12),
                       OutlinedButton(
                         onPressed: () => setState(() {

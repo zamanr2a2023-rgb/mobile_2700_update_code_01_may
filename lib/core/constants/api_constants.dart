@@ -1,17 +1,19 @@
 abstract final class ApiConstants {
-  /// Backend root URL.
-  ///
-  /// From your Postman screenshots:
-  /// - Auth:  POST http://192.168.10.251:6000/api/v1/auth/login
-  /// - Users: PATCH http://192.168.10.251:7000/api/v1/users/me/availability
-  ///
-  /// Kept for backward-compat with existing services.
-  static const String baseUrl = authBaseUrl;
+  /// Backend root URL. Override for local dev:
+  /// `flutter run --dart-define=API_BASE_URL=http://10.0.2.2:5000`
+  static const String apiBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://api.thetruckfix.co.uk',
+  );
 
-  static const String authBaseUrl = 'https://api.thetruckfix.co.uk';
-  static const String usersBaseUrl = 'https://api.thetruckfix.co.uk';
-  //  static const String authBaseUrl = 'http://103.208.183.248:5000';
-  // static const String usersBaseUrl = 'http://103.208.183.248:5000';
+  static String get baseUrl => _normalizedBase;
+  static String get authBaseUrl => _normalizedBase;
+  static String get usersBaseUrl => _normalizedBase;
+
+  static String get _normalizedBase => apiBaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+
+  // Legacy commented local URLs (use --dart-define=API_BASE_URL=... instead):
+  // http://103.208.183.248:5000
 
   static const String authLoginPath = '/api/v1/auth/login';
   static const String authLogoutPath = '/api/v1/auth/logout';
