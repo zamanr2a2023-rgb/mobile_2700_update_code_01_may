@@ -6,6 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/models/mechanic_me_profile.dart';
 import '../../../routes/app_routes.dart';
 import '../../../widgets/support_help_bottom_sheet.dart';
+import '../../../widgets/account_delete_button.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
 import '../../mechanic/viewmodel/mechanic_viewmodel.dart';
 
@@ -238,7 +239,9 @@ class _EmployeeProfilePageState extends State<EmployeeProfilePage> {
             ),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
+        const ProfileDeleteAccountButton(),
+        const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(

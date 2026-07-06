@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../routes/app_routes.dart';
+import '../../../widgets/account_delete_button.dart';
 import '../../../data/services/support_api_service.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
 import '../viewmodel/company_viewmodel.dart';
@@ -2482,7 +2483,12 @@ class _CompanyProfileFullViewState extends State<CompanyProfileFullView> {
           onTap: () => showCompanyHelpSupportSheet(context),
         ),
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 12),
+      const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 20),
+        child: ProfileDeleteAccountButton(),
+      ),
+      const SizedBox(height: 12),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: OutlinedButton.icon(

@@ -17,6 +17,7 @@ import '../../../data/repositories/app_repository.dart';
 import '../../../data/services/support_api_service.dart';
 import '../../../routes/app_routes.dart';
 import '../../../widgets/api_job_chat_screen.dart';
+import '../../../widgets/account_delete_button.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
 import '../models/fleet_chat_session.dart';
 import '../viewmodel/fleet_viewmodel.dart';
@@ -4294,6 +4295,8 @@ class _FleetProfile extends StatelessWidget {
                     subtitle: 'Send a message to the TruckFix team',
                     onTap: onHelp,
                   ),
+                  const SizedBox(height: 12),
+                  const ProfileDeleteAccountButton(),
                   const SizedBox(height: 12),
                   Material(
                     color: AppColors.red.withValues(alpha: 0.05),
