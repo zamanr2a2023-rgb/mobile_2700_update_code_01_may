@@ -23,6 +23,7 @@ import '../../../routes/app_routes.dart';
 import '../../../widgets/job_location_google_map_preview.dart';
 import '../../../widgets/truckfix_map_preview.dart';
 import '../../../widgets/api_job_chat_screen.dart';
+import '../../../widgets/account_delete_button.dart';
 import '../../auth/viewmodel/auth_viewmodel.dart';
 import '../../categories/job_taxonomy.dart';
 import '../viewmodel/mechanic_viewmodel.dart';
@@ -7112,7 +7113,9 @@ class _MechanicProfileState extends State<_MechanicProfile> {
           subtitle: 'Send a message to the TruckFix team',
           onTap: widget.onHelp,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 10),
+        const ProfileDeleteAccountButton(),
+        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: widget.onLogout,
           style: OutlinedButton.styleFrom(

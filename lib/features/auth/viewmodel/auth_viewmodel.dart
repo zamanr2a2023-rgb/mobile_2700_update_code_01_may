@@ -58,6 +58,19 @@ class AuthViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Permanently deletes the signed-in account (Apple Guideline 5.1.1(v)).
+  Future<void> deleteAccount() async {
+    final token = _session?.accessToken?.trim();
+    if (token == null || token.isEmpty) {
+      throw Exception('Not signed in');
+    }
+    await _authRepository.deleteAccount(accessToken: token);
+    _session = null;
+    registrationRole = null;
+    await DeviceTokenSyncService.instance.clearLastSync();
+    notifyListeners();
+  }
+
   Future<void> completeRegistration(UserRole role, {String email = 'new@truckfix.app'}) async {
     await loginAs(email, '', role);
     registrationRole = null;

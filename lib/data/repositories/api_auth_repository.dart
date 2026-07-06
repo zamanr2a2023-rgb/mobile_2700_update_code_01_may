@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/api_constants.dart';
 import '../models/forgot_password_result.dart';
 import '../models/session.dart';
+import '../services/users_api_service.dart';
 import 'app_repository.dart';
 
 class ApiAuthRepository implements AuthRepository {
@@ -188,6 +189,12 @@ class ApiAuthRepository implements AuthRepository {
       accessToken: accessToken,
       refreshToken: refreshToken,
     );
+  }
+
+  @override
+  Future<void> deleteAccount({required String accessToken}) async {
+    await UsersApiService(baseUrl: _baseUrl, client: _client).deleteMe(accessToken: accessToken);
+    await clearSession();
   }
 
   @override

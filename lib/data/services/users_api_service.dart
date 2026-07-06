@@ -45,6 +45,19 @@ class UsersApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to update profile');
   }
 
+  /// Permanently delete the signed-in user (`DELETE /api/v1/users/me`).
+  Future<void> deleteMe({required String accessToken}) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.usersMePath}');
+    final res = await _client.delete(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    _decodeOrThrow(res, defaultMessage: 'Failed to delete account');
+  }
+
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
     Map<String, dynamic> body;
     try {
