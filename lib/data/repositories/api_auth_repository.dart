@@ -192,8 +192,14 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> deleteAccount({required String accessToken}) async {
-    await UsersApiService(baseUrl: _baseUrl, client: _client).deleteMe(accessToken: accessToken);
+  Future<void> deleteAccount({
+    required String accessToken,
+    required String password,
+  }) async {
+    await UsersApiService(baseUrl: _baseUrl, client: _client).deleteMe(
+      accessToken: accessToken,
+      password: password,
+    );
     await clearSession();
   }
 

@@ -23,8 +23,11 @@ abstract class AuthRepository {
   /// Optional backend logout (best-effort). Send [accessToken] as `Authorization: Bearer` when present.
   Future<void> logout({String? accessToken, String? refreshToken});
 
-  /// Permanently delete the signed-in account (`DELETE /api/v1/users/me`).
-  Future<void> deleteAccount({required String accessToken});
+  /// Permanently delete the signed-in account (`DELETE /api/v1/users/me` + password).
+  Future<void> deleteAccount({
+    required String accessToken,
+    required String password,
+  });
 
   /// `POST /api/v1/auth/forgot-password` — sends reset instructions to [email].
   Future<ForgotPasswordResult> forgotPassword({required String email});
@@ -110,7 +113,10 @@ class MemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> deleteAccount({required String accessToken}) async {
+  Future<void> deleteAccount({
+    required String accessToken,
+    required String password,
+  }) async {
     await clearSession();
   }
 
