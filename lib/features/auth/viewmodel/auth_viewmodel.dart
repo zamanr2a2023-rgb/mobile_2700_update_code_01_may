@@ -59,16 +59,23 @@ class AuthViewModel extends ChangeNotifier {
   }
 
   /// Permanently deletes the signed-in account (Apple Guideline 5.1.1(v)).
-  Future<void> deleteAccount() async {
+  Future<void> deleteAccount({required String password}) async {
     final token = _session?.accessToken?.trim();
     if (token == null || token.isEmpty) {
       throw Exception('Not signed in');
     }
-    await _authRepository.deleteAccount(accessToken: token);
+    final pwd = password.trim();
+    if (pwd.isEmpty) {
+      throw Exception('Password is required');
+    }
+    await _authRepository.deleteAccount(accessToken: token, password: pwd);
     _session = null;
     registrationRole = null;
     await DeviceTokenSyncService.instance.clearLastSync();
-    notifyListeners();
+    // Defer so callers can navigate before GoRouter tears down the current tree.
+    scheduleMicrotask(() {
+      if (hasListeners) notifyListeners();
+    });
   }
 
   Future<void> completeRegistration(UserRole role, {String email = 'new@truckfix.app'}) async {

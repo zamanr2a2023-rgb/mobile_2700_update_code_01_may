@@ -46,16 +46,23 @@ class UsersApiService {
   }
 
   /// Permanently delete the signed-in user (`DELETE /api/v1/users/me`).
-  Future<void> deleteMe({required String accessToken}) async {
+  ///
+  /// Backend requires the account password in the JSON body: `{ "password": "..." }`.
+  Future<Map<String, dynamic>> deleteMe({
+    required String accessToken,
+    required String password,
+  }) async {
     final uri = Uri.parse('$_baseUrl${ApiConstants.usersMePath}');
     final res = await _client.delete(
       uri,
       headers: {
         'Accept': 'application/json',
+        'Content-Type': 'application/json',
         'Authorization': 'Bearer $accessToken',
       },
+      body: jsonEncode({'password': password}),
     );
-    _decodeOrThrow(res, defaultMessage: 'Failed to delete account');
+    return _decodeOrThrow(res, defaultMessage: 'Failed to delete account');
   }
 
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
