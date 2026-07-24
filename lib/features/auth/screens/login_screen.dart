@@ -9,10 +9,18 @@ import '../viewmodel/auth_viewmodel.dart';
 import '../../../widgets/buttons.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.role, required this.onNavigate});
+  const LoginScreen({
+    super.key,
+    required this.role,
+    required this.onNavigate,
+    this.nextAfterLogin,
+  });
 
   final UserRole role;
   final void Function(String) onNavigate;
+
+  /// Optional post-login route id (e.g. `company-invites`).
+  final String? nextAfterLogin;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -92,6 +100,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
       final resolvedRole =
           context.read<AuthViewModel>().session?.role ?? widget.role;
+      final next = widget.nextAfterLogin?.trim();
+      if (next != null && next.isNotEmpty) {
+        widget.onNavigate(next);
+        return;
+      }
       widget.onNavigate(
         switch (resolvedRole) {
           UserRole.mechanic => 'mechanic-dashboard',

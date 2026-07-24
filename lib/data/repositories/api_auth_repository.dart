@@ -204,6 +204,34 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<Session> mergeSessionFromAuthBody(
+    Map<String, dynamic> body, {
+    required UserRole roleHint,
+  }) async {
+    final current = await getSession();
+    final parsed = _sessionFromAuthBody(
+      body,
+      fallbackEmail: current?.email ?? '',
+      roleHint: roleHint,
+    );
+    final merged = Session(
+      email: parsed.email.trim().isNotEmpty ? parsed.email : (current?.email ?? ''),
+      role: parsed.role,
+      displayName: (parsed.displayName?.trim().isNotEmpty == true)
+          ? parsed.displayName
+          : current?.displayName,
+      accessToken: (parsed.accessToken?.trim().isNotEmpty == true)
+          ? parsed.accessToken
+          : current?.accessToken,
+      refreshToken: (parsed.refreshToken?.trim().isNotEmpty == true)
+          ? parsed.refreshToken
+          : current?.refreshToken,
+    );
+    await saveSession(merged);
+    return merged;
+  }
+
+  @override
   Future<void> logout({String? accessToken, String? refreshToken}) async {
     final uri = Uri.parse('$_baseUrl${ApiConstants.authLogoutPath}');
     try {
@@ -430,7 +458,7 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> registerMechanicEmployee({
+  Future<Session> registerMechanicEmployee({
     required String email,
     required String password,
     required String confirmPassword,
@@ -475,6 +503,14 @@ class ApiAuthRepository implements AuthRepository {
           'Registration failed (HTTP ${res.statusCode}).';
       throw AuthException(msg);
     }
+
+    final session = _sessionFromAuthBody(
+      body,
+      fallbackEmail: email,
+      roleHint: UserRole.employee,
+    );
+    await saveSession(session);
+    return session;
   }
 }
 

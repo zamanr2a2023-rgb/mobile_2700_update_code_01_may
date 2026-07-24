@@ -220,3 +220,11 @@ For data protection enquiries, please include “Data protection” in your emai
 ---
 
 *This document is provided for Google Play Console, website hosting and user transparency. It should be published at a public URL (e.g. `https://truckfix.co.uk/privacy` or `https://truckfix.co.uk/delete-account`) before submitting your app.*
+
+---
+
+## Appendix — Company invitation (mobile)
+
+Independent mechanics receive company invitations in-app (**Profile → Company invitations**). New users without an account open the invitation link, validate the token, and register as `MECHANIC_EMPLOYEE`.
+
+**Known backend limitation:** users who already have the `MECHANIC_EMPLOYEE` role with an *inactive* company membership may fail accept/re-invite until the backend reactivates membership. The mobile app surfaces the API error message as-is and does not invent local membership or role changes.

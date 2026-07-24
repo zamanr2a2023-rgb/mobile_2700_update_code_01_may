@@ -16,4 +16,10 @@ abstract final class AppRoutes {
   static const mechanicHome = '/mechanic';
   static const companyHome = '/company';
   static const employeeHome = '/employee';
+
+  /// Independent mechanic — pending company invitations inbox.
+  static const companyInvites = '/mechanic/company-invites';
+
+  /// New-user invite registration (deep link / validated token).
+  static const inviteRegister = '/invite-register';
 }

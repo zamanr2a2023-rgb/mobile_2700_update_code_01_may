@@ -245,6 +245,26 @@ class CompanyApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to send invitation');
   }
 
+  /// `POST /api/v1/company/team/invitations/{inviteId}/resend`
+  Future<Map<String, dynamic>> resendCompanyTeamInvitation({
+    required String accessToken,
+    required String inviteId,
+  }) async {
+    final id = inviteId.trim();
+    if (id.isEmpty) throw Exception('Invalid invitation');
+    final uri = Uri.parse('$_baseUrl${ApiConstants.companyTeamInvitationsPath}/$id/resend');
+    final res = await _client.post(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: '{}',
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to resend invitation');
+  }
+
   /// DELETE for team URLs from the API (e.g. `cardAction.href` → `/api/v1/company/team/members/{id}`, or
   /// `DELETE /api/v1/company/team/invitations/{inviteId}` to cancel an invite).
   Future<void> deleteCompanyTeamByPath({

@@ -65,6 +65,59 @@ class UsersApiService {
     return _decodeOrThrow(res, defaultMessage: 'Failed to delete account');
   }
 
+  /// Pending company invitations for the signed-in mechanic.
+  Future<Map<String, dynamic>> fetchCompanyInvites({required String accessToken}) async {
+    final uri = Uri.parse('$_baseUrl${ApiConstants.usersMeCompanyInvitesPath}');
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to load company invitations');
+  }
+
+  /// Accept a company invitation (`POST .../company-invites/{inviteId}/accept`).
+  Future<Map<String, dynamic>> acceptCompanyInvite({
+    required String accessToken,
+    required String inviteId,
+  }) async {
+    final id = inviteId.trim();
+    if (id.isEmpty) throw UsersApiException('Invalid invitation');
+    final uri = Uri.parse('$_baseUrl${ApiConstants.usersMeCompanyInvitesPath}/$id/accept');
+    final res = await _client.post(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: '{}',
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to accept invitation');
+  }
+
+  /// Decline a company invitation (`POST .../company-invites/{inviteId}/decline`).
+  Future<Map<String, dynamic>> declineCompanyInvite({
+    required String accessToken,
+    required String inviteId,
+  }) async {
+    final id = inviteId.trim();
+    if (id.isEmpty) throw UsersApiException('Invalid invitation');
+    final uri = Uri.parse('$_baseUrl${ApiConstants.usersMeCompanyInvitesPath}/$id/decline');
+    final res = await _client.post(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: '{}',
+    );
+    return _decodeOrThrow(res, defaultMessage: 'Failed to decline invitation');
+  }
+
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
     Map<String, dynamic> body;
     try {

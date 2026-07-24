@@ -107,6 +107,7 @@ class _MechBody extends StatelessWidget {
           onEdit: () => vm.setTab('edit-profile'),
           onPayment: () => vm.setTab('payment-methods'),
           onHelp: () => showMechanicHelpSupportSheet(context),
+          onCompanyInvites: () => context.push(AppRoutes.companyInvites),
           onLogout: () async {
             await context.read<AuthViewModel>().logout();
             if (context.mounted) context.go(AppRoutes.login);
@@ -6426,6 +6427,7 @@ class _MechanicProfile extends StatefulWidget {
     required this.onEdit,
     required this.onPayment,
     required this.onHelp,
+    required this.onCompanyInvites,
     required this.onLogout,
   });
 
@@ -6433,6 +6435,7 @@ class _MechanicProfile extends StatefulWidget {
   final VoidCallback onEdit;
   final VoidCallback onPayment;
   final VoidCallback onHelp;
+  final VoidCallback onCompanyInvites;
   final VoidCallback onLogout;
 
   @override
@@ -7105,6 +7108,13 @@ class _MechanicProfileState extends State<_MechanicProfile> {
             return 'Manage cards for expenses & receipts';
           })(),
           onTap: widget.onPayment,
+        ),
+        const SizedBox(height: 10),
+        profileShortcut(
+          icon: Icons.apartment_outlined,
+          title: 'Company invitations',
+          subtitle: 'Accept or decline workshop team invites',
+          onTap: widget.onCompanyInvites,
         ),
         const SizedBox(height: 10),
         profileShortcut(

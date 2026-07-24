@@ -6,9 +6,11 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'device_token_sync_service.dart';
+import '../../routes/app_routes.dart';
 
 const _kFcmTokenKey = 'truckfix.fcm.token.v1';
 const _androidChannelId = 'truckfix_alerts';
@@ -45,6 +47,19 @@ class PushNotificationService {
 
   bool _initialized = false;
   bool get isInitialized => _initialized;
+
+  GoRouter? _router;
+  Map<String, dynamic>? _pendingNavData;
+
+  /// Attach the app [GoRouter] so notification taps can navigate.
+  void attachRouter(GoRouter router) {
+    _router = router;
+    final pending = _pendingNavData;
+    if (pending != null) {
+      _pendingNavData = null;
+      _navigateFromData(pending);
+    }
+  }
 
   /// Prints the last known FCM token to the console.
   Future<void> logCurrentToken() async {
@@ -169,6 +184,20 @@ class PushNotificationService {
     const ios = DarwinInitializationSettings();
     await _localNotifications.initialize(
       const InitializationSettings(android: android, iOS: ios),
+      onDidReceiveNotificationResponse: (response) {
+        final payload = response.payload;
+        if (payload == null || payload.trim().isEmpty) return;
+        try {
+          final decoded = jsonDecode(payload);
+          if (decoded is Map<String, dynamic>) {
+            _navigateFromData(decoded);
+          } else if (decoded is Map) {
+            _navigateFromData(Map<String, dynamic>.from(decoded));
+          }
+        } catch (_) {
+          // Ignore malformed payloads.
+        }
+      },
     );
 
     const channel = AndroidNotificationChannel(
@@ -239,7 +268,35 @@ class PushNotificationService {
 
   void _onMessageOpenedApp(RemoteMessage message) {
     if (kDebugMode) {
-      debugPrint('[FCM] opened from notification: ${message.data}');
+      // Never log invite tokens if present.
+      final safe = Map<String, dynamic>.from(message.data)
+        ..remove('inviteToken')
+        ..remove('invite_token')
+        ..remove('token');
+      debugPrint('[FCM] opened from notification: $safe');
+    }
+    _navigateFromData(message.data);
+  }
+
+  void _navigateFromData(Map<String, dynamic> data) {
+    final type = '${data['type'] ?? data['notificationType'] ?? data['event'] ?? ''}'
+        .trim()
+        .toUpperCase();
+    if (type != 'COMPANY_INVITE_RECEIVED' && type != 'COMPANY_INVITE') {
+      return;
+    }
+
+    final router = _router;
+    if (router == null) {
+      _pendingNavData = Map<String, dynamic>.from(data);
+      return;
+    }
+
+    final inviteId = '${data['inviteId'] ?? data['invitationId'] ?? data['id'] ?? ''}'.trim();
+    if (inviteId.isNotEmpty) {
+      router.go('${AppRoutes.companyInvites}?inviteId=${Uri.encodeQueryComponent(inviteId)}');
+    } else {
+      router.go(AppRoutes.companyInvites);
     }
   }
 }
