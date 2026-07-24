@@ -2,11 +2,13 @@ import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../data/models/company_invite.dart';
 import '../../../routes/app_routes.dart';
 import '../../../widgets/account_delete_button.dart';
 import '../../../data/services/support_api_service.dart';
@@ -1515,9 +1517,9 @@ class _CompanyTeamManagementViewState extends State<CompanyTeamManagementView> {
             ),
           ),
           Expanded(
-            child: vm.teamLoading && members.isEmpty
+            child: vm.teamLoading && members.isEmpty && vm.teamPendingInvites.isEmpty
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : vm.teamError != null && members.isEmpty
+                : vm.teamError != null && members.isEmpty && vm.teamPendingInvites.isEmpty
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),
@@ -1535,19 +1537,59 @@ class _CompanyTeamManagementViewState extends State<CompanyTeamManagementView> {
                           ),
                         ),
                       )
-                    : members.isEmpty
+                    : members.isEmpty && vm.teamPendingInvites.isEmpty
                         ? const Center(child: Text('No team members yet.', style: TextStyle(color: AppColors.textMuted, fontSize: 14)))
                         : RefreshIndicator(
                             color: AppColors.primary,
                             onRefresh: vm.loadCompanyTeam,
-                            child: ListView.builder(
+                            child: ListView(
                               physics: const AlwaysScrollableScrollPhysics(),
                               padding: const EdgeInsets.all(16),
-                              itemCount: members.length,
-                              itemBuilder: (_, i) => Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _mechanicCard(context, members[i]),
-                              ),
+                              children: [
+                                if (vm.teamPendingInvites.isNotEmpty) ...[
+                                  const Text(
+                                    'PENDING INVITES',
+                                    style: TextStyle(
+                                      color: AppColors.primary,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  for (final invite in vm.teamPendingInvites)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 10),
+                                      child: _PendingInviteCard(invite: invite),
+                                    ),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'TEAM MEMBERS',
+                                    style: TextStyle(
+                                      color: AppColors.primary,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                                if (members.isEmpty)
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 24),
+                                    child: Text(
+                                      'No active team members yet.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                    ),
+                                  )
+                                else
+                                  for (final m in members)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 12),
+                                      child: _mechanicCard(context, m),
+                                    ),
+                              ],
                             ),
                           ),
           ),
@@ -1959,6 +2001,237 @@ class _CompanyTeamManagementViewState extends State<CompanyTeamManagementView> {
   }
 }
 
+class _PendingInviteCard extends StatefulWidget {
+  const _PendingInviteCard({required this.invite});
+
+  final CompanyTeamPendingInvite invite;
+
+  @override
+  State<_PendingInviteCard> createState() => _PendingInviteCardState();
+}
+
+class _PendingInviteCardState extends State<_PendingInviteCard> {
+  bool _busy = false;
+
+  Future<void> _resend() async {
+    final id = widget.invite.id.trim();
+    if (id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This invitation cannot be resent (missing id).')),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await context.read<CompanyViewModel>().resendCompanyTeamInvitation(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invitation resent'), behavior: SnackBarBehavior.floating),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')), behavior: SnackBarBehavior.floating),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _cancel() async {
+    final id = widget.invite.id.trim();
+    if (id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This invitation cannot be cancelled (missing id).')),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text('Cancel invitation?', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text(
+          'Cancel the invite to ${widget.invite.email}?',
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel invite', style: TextStyle(color: AppColors.red)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await context.read<CompanyViewModel>().cancelCompanyTeamInvitation(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invitation cancelled'), behavior: SnackBarBehavior.floating),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', '')), behavior: SnackBarBehavior.floating),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final invite = widget.invite;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F0F0F),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  invite.email.isEmpty ? 'Pending invite' : invite.email,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                ),
+              ),
+              Text(
+                (invite.status.isEmpty ? 'PENDING' : invite.status).toUpperCase(),
+                style: const TextStyle(color: AppColors.primary, fontSize: 9, fontWeight: FontWeight.w900),
+              ),
+            ],
+          ),
+          if (invite.expiresAtIso.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Expires ${invite.expiresAtIso}',
+              style: TextStyle(color: AppColors.textHint.withValues(alpha: 0.95), fontSize: 10),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _busy ? null : _cancel,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.red,
+                    side: BorderSide(color: AppColors.red.withValues(alpha: 0.35)),
+                  ),
+                  child: const Text('Cancel', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _busy ? null : _resend,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.black,
+                  ),
+                  child: _busy
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        )
+                      : const Text('Resend', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InviteResultDialog extends StatelessWidget {
+  const _InviteResultDialog({required this.result});
+
+  final CompanyInviteSendResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final signupUrl = (result.signupUrl ?? '').trim();
+    final existing = result.existingAccount;
+
+    return AlertDialog(
+      backgroundColor: AppColors.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(
+        existing ? 'Mechanic already registered' : 'Invitation sent',
+        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            existing
+                ? (result.message?.trim().isNotEmpty == true
+                    ? result.message!.trim()
+                    : 'This email already has a TruckFix account. The invitation will appear in their app — they must sign in and accept it. Do not ask them to register again.')
+                : (result.message?.trim().isNotEmpty == true
+                    ? result.message!.trim()
+                    : 'Share the signup link so the new mechanic can create their employee account.'),
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
+          ),
+          if (!result.emailSent) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.orange.withValues(alpha: 0.3)),
+              ),
+              child: const Text(
+                'Email was not sent automatically. Please copy or share the invitation link below.',
+                style: TextStyle(color: AppColors.orange, fontSize: 12, height: 1.35),
+              ),
+            ),
+          ],
+          if (!existing && signupUrl.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            SelectableText(
+              signupUrl,
+              style: const TextStyle(color: AppColors.primary, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        if (!existing && signupUrl.isNotEmpty)
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: signupUrl));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invite link copied'), behavior: SnackBarBehavior.floating),
+                );
+              }
+            },
+            child: const Text('Copy link', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700)),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Done', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+}
+
 class _CompanyTeamInviteSheetContent extends StatefulWidget {
   const _CompanyTeamInviteSheetContent({required this.bottomInset});
 
@@ -1996,14 +2269,12 @@ class _CompanyTeamInviteSheetContentState extends State<_CompanyTeamInviteSheetC
 
     final vm = context.read<CompanyViewModel>();
     try {
-      final apiMessage = await vm.sendCompanyTeamInvitation(raw);
+      final result = await vm.sendCompanyTeamInvitation(raw);
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(apiMessage ?? 'Invitation sent'),
-          behavior: SnackBarBehavior.floating,
-        ),
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => _InviteResultDialog(result: result),
       );
     } catch (_) {
       if (!mounted) return;

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import 'core/services/device_token_sync_service.dart';
+import 'core/services/invite_deep_link_service.dart';
 import 'core/services/push_notification_service.dart';
 import 'core/theme/app_theme.dart';
 import 'data/repositories/app_repository.dart';
@@ -37,6 +38,9 @@ Future<void> main() async {
   }
 
   final router = AppRouter.create(authViewModel);
+  InviteDeepLinkService.instance.attachRouter(router);
+  PushNotificationService.instance.attachRouter(router);
+  unawaited(InviteDeepLinkService.instance.start());
 
   runApp(
     MultiProvider(

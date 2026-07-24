@@ -22,6 +22,10 @@ abstract final class ApiConstants {
 
   static const String usersMeAvailabilityPath = '/api/v1/users/me/availability';
   static const String usersMePath = '/api/v1/users/me';
+  static const String usersMeCompanyInvitesPath = '/api/v1/users/me/company-invites';
+  static const String publicInvitesValidatePath = '/api/v1/public/invites/validate';
+  static const String companyTeamPath = '/api/v1/company/team';
+  static const String companyTeamInvitationsPath = '/api/v1/company/team/invitations';
   static const String supportTicketsPath = '/api/v1/support/tickets';
   static const String jobsPath = '/api/v1/jobs';
 

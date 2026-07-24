@@ -101,4 +101,18 @@ class AuthViewModel extends ChangeNotifier {
     notifyListeners();
     unawaited(DeviceTokenSyncService.instance.syncWithSession(session));
   }
+
+  /// After accepting a company invite — merge returned user into the session.
+  /// Role should become [UserRole.employee] when the backend confirms it.
+  Future<Session> applyInviteAcceptResponse(Map<String, dynamic> body) async {
+    final updated = await _authRepository.mergeSessionFromAuthBody(
+      body,
+      roleHint: UserRole.employee,
+    );
+    _session = updated;
+    registrationRole = null;
+    notifyListeners();
+    unawaited(DeviceTokenSyncService.instance.syncWithSession(updated));
+    return updated;
+  }
 }

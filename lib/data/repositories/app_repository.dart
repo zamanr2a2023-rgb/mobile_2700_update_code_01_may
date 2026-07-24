@@ -29,6 +29,13 @@ abstract class AuthRepository {
     required String password,
   });
 
+  /// Merge user/role fields from an auth-like API body into the current session
+  /// (e.g. after accepting a company invite). Preserves tokens when the body omits them.
+  Future<Session> mergeSessionFromAuthBody(
+    Map<String, dynamic> body, {
+    required UserRole roleHint,
+  });
+
   /// `POST /api/v1/auth/forgot-password` — sends reset instructions to [email].
   Future<ForgotPasswordResult> forgotPassword({required String email});
 
@@ -66,7 +73,8 @@ abstract class AuthRepository {
   });
 
   /// Company mechanic employee (invite) — `POST /api/v1/auth/register` with `role: MECHANIC_EMPLOYEE`.
-  Future<void> registerMechanicEmployee({
+  /// Returns a session when the API issues tokens.
+  Future<Session> registerMechanicEmployee({
     required String email,
     required String password,
     required String confirmPassword,
@@ -121,6 +129,24 @@ class MemoryAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<Session> mergeSessionFromAuthBody(
+    Map<String, dynamic> body, {
+    required UserRole roleHint,
+  }) async {
+    final current = _session;
+    final email = current?.email ?? 'merged@truckfix.app';
+    final s = Session(
+      email: email,
+      role: roleHint,
+      displayName: current?.displayName,
+      accessToken: current?.accessToken,
+      refreshToken: current?.refreshToken,
+    );
+    await saveSession(s);
+    return s;
+  }
+
+  @override
   Future<ForgotPasswordResult> forgotPassword({required String email}) async {
     return ForgotPasswordResult(
       message: 'If an account exists for this email, password reset instructions have been sent.',
@@ -171,7 +197,7 @@ class MemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> registerMechanicEmployee({
+  Future<Session> registerMechanicEmployee({
     required String email,
     required String password,
     required String confirmPassword,
@@ -182,7 +208,13 @@ class MemoryAuthRepository implements AuthRepository {
     required String baseLocationText,
     required List<String> skills,
   }) async {
-    // No-op for prototype mode.
+    final s = Session(
+      email: email,
+      role: UserRole.employee,
+      displayName: displayName.trim().isNotEmpty ? displayName.trim() : fullName.trim(),
+    );
+    await saveSession(s);
+    return s;
   }
 }
 

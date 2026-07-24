@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../data/repositories/app_repository.dart';
 import '../../../data/repositories/api_auth_repository.dart';
+import '../../../data/models/company_invite.dart';
 import '../../../data/models/job_chat_models.dart';
 import '../../../data/services/chat_api_service.dart';
 import '../../../data/services/company_api_service.dart';
@@ -125,17 +126,36 @@ class CompanyTeamMember {
 }
 
 class CompanyTeamPendingInvite {
-  const CompanyTeamPendingInvite({required this.email, required this.expiresAtIso, required this.status});
+  const CompanyTeamPendingInvite({
+    required this.id,
+    required this.email,
+    required this.expiresAtIso,
+    required this.status,
+  });
 
+  final String id;
   final String email;
   final String expiresAtIso;
   final String status;
 
   factory CompanyTeamPendingInvite.fromJson(Map<String, dynamic> json) {
+    String? pick(List<String> keys) {
+      for (final k in keys) {
+        final v = json[k];
+        if (v is String && v.trim().isNotEmpty) return v.trim();
+        if (v != null && v is! Map && v is! List) {
+          final s = '$v'.trim();
+          if (s.isNotEmpty) return s;
+        }
+      }
+      return null;
+    }
+
     return CompanyTeamPendingInvite(
-      email: ((json['email'] as String?) ?? '').trim(),
-      expiresAtIso: ((json['expiresAt'] as String?) ?? '').trim(),
-      status: ((json['status'] as String?) ?? '').trim(),
+      id: pick(['_id', 'id', 'inviteId', 'invitationId']) ?? '',
+      email: pick(['email']) ?? '',
+      expiresAtIso: pick(['expiresAt', 'expires_at']) ?? '',
+      status: pick(['status']) ?? 'PENDING',
     );
   }
 }
@@ -1947,7 +1967,7 @@ class CompanyViewModel extends ChangeNotifier {
     }
   }
 
-  Future<String?> sendCompanyTeamInvitation(String email) async {
+  Future<CompanyInviteSendResult> sendCompanyTeamInvitation(String email) async {
     final trimmed = email.trim();
     if (trimmed.isEmpty) throw Exception('Email required');
     teamInviteSending = true;
@@ -1985,8 +2005,7 @@ class CompanyViewModel extends ChangeNotifier {
 
       final body = await _api.postCompanyTeamInvitation(accessToken: token, path: path, body: payload);
       await loadCompanyTeam();
-      final msg = ((body['message'] as String?) ?? '').trim();
-      return msg.isNotEmpty ? msg : null;
+      return CompanyInviteSendResult.fromEnvelope(body);
     } catch (e) {
       teamInviteError = e.toString();
       rethrow;
@@ -1994,6 +2013,29 @@ class CompanyViewModel extends ChangeNotifier {
       teamInviteSending = false;
       notifyListeners();
     }
+  }
+
+  Future<void> resendCompanyTeamInvitation(String inviteId) async {
+    final id = inviteId.trim();
+    if (id.isEmpty) throw Exception('Invalid invitation');
+    final session = await _auth.getSession();
+    final token = session?.accessToken;
+    if (token == null || token.isEmpty) throw Exception('Not authenticated');
+    await _api.resendCompanyTeamInvitation(accessToken: token, inviteId: id);
+    await loadCompanyTeam();
+  }
+
+  Future<void> cancelCompanyTeamInvitation(String inviteId) async {
+    final id = inviteId.trim();
+    if (id.isEmpty) throw Exception('Invalid invitation');
+    final session = await _auth.getSession();
+    final token = session?.accessToken;
+    if (token == null || token.isEmpty) throw Exception('Not authenticated');
+    await _api.deleteCompanyTeamByPath(
+      accessToken: token,
+      path: '/api/v1/company/team/invitations/$id',
+    );
+    await loadCompanyTeam();
   }
 
   /// Resolves DELETE path: prefers [CompanyTeamMember.cardAction.href], else `/api/v1/company/team/members/{mongoId}`.

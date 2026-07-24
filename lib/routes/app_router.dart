@@ -6,6 +6,7 @@ import '../features/auth/screens/fleet_register_screen.dart';
 import '../features/auth/screens/intro_loader_screen.dart';
 import '../features/auth/screens/login_screen.dart';
 import '../features/auth/screens/mechanic_register_screen.dart';
+import '../features/auth/screens/invite_register_screen.dart';
 import '../features/auth/screens/pending_screen.dart';
 import '../features/auth/screens/role_select_screen.dart';
 import '../features/auth/screens/splash_screen.dart';
@@ -17,6 +18,7 @@ import '../features/company/screens/company_app_shell.dart';
 import '../features/employee/screens/employee_app_shell.dart';
 import '../features/fleet/screens/fleet_app_shell.dart';
 import '../features/mechanic/screens/mechanic_app_shell.dart';
+import '../features/mechanic/screens/company_invites_screen.dart';
 import 'app_routes.dart';
 
 /// Application router with auth redirect guards.
@@ -65,6 +67,12 @@ abstract final class AppRouter {
       case 'mechanic-terms':
         router.go(AppRoutes.termsMechanic);
         return;
+      case 'company-invites':
+        router.go(AppRoutes.companyInvites);
+        return;
+      case 'invite-register':
+        router.go(AppRoutes.inviteRegister);
+        return;
       case 'forgot':
         router.push(AppRoutes.forgot);
         return;
@@ -91,9 +99,15 @@ abstract final class AppRouter {
                 path == AppRoutes.roleSelect ||
                 path == AppRoutes.fleetRegister ||
                 path == AppRoutes.mechanicRegister ||
+                path == AppRoutes.inviteRegister ||
                 path == AppRoutes.forgot ||
                 path == AppRoutes.pending ||
                 path.startsWith('/terms/'))) {
+          // Preserve post-login invite inbox redirect for existing mechanics.
+          final next = state.uri.queryParameters['next'];
+          if (path == AppRoutes.login && next == 'company-invites') {
+            return AppRoutes.companyInvites;
+          }
           return homeRouteForSession(auth.session!);
         }
         return null;
@@ -118,9 +132,27 @@ abstract final class AppRouter {
               'fleet' => UserRole.fleet,
               _ => UserRole.fleet,
             };
+            final next = state.uri.queryParameters['next'];
             return LoginScreen(
               role: role,
+              nextAfterLogin: next,
               onNavigate: (id) => navigateAuth(context, id),
+            );
+          },
+        ),
+        GoRoute(
+          path: AppRoutes.inviteRegister,
+          builder: (context, state) {
+            final email = (state.uri.queryParameters['email'] ?? '').trim();
+            final token = (state.uri.queryParameters['inviteToken'] ??
+                    state.uri.queryParameters['token'] ??
+                    '')
+                .trim();
+            final companyName = state.uri.queryParameters['companyName'];
+            return InviteRegisterScreen(
+              email: email,
+              inviteToken: token,
+              companyName: companyName,
             );
           },
         ),
@@ -188,6 +220,13 @@ abstract final class AppRouter {
           builder: (context, state) => const MechanicAppShell(),
         ),
         GoRoute(
+          path: AppRoutes.companyInvites,
+          builder: (context, state) {
+            final inviteId = state.uri.queryParameters['inviteId'];
+            return CompanyInvitesScreen(highlightInviteId: inviteId);
+          },
+        ),
+        GoRoute(
           path: AppRoutes.companyHome,
           builder: (context, state) => const CompanyAppShell(),
         ),
@@ -208,6 +247,7 @@ abstract final class AppRouter {
       path == AppRoutes.roleSelect ||
       path == AppRoutes.fleetRegister ||
       path == AppRoutes.mechanicRegister ||
+      path == AppRoutes.inviteRegister ||
       path.startsWith('/terms/') ||
       path == AppRoutes.pending;
 }

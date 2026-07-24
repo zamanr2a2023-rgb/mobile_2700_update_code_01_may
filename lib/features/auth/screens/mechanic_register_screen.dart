@@ -8,6 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/repositories/app_repository.dart';
 import '../../../widgets/app_input.dart';
 import '../../../widgets/buttons.dart';
+import '../viewmodel/auth_viewmodel.dart';
 
 /// Skill codes accepted by `POST /auth/register` for `MECHANIC_EMPLOYEE` (see Postman).
 const _kMechanicEmployeeSkillOptions = <(String code, String label)>[
@@ -161,7 +162,7 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
         final invite = _inviteToken.text.trim();
         final disp = _employeeDisplayName.text.trim();
         final baseLoc = basePostcode;
-        await auth.registerMechanicEmployee(
+        final session = await auth.registerMechanicEmployee(
           email: email,
           password: password,
           confirmPassword: confirmPassword,
@@ -172,6 +173,11 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
           baseLocationText: baseLoc,
           skills: _employeeSkills.toList()..sort(),
         );
+        if (!mounted) return;
+        await context.read<AuthViewModel>().adoptSession(session);
+        if (!mounted) return;
+        widget.onNavigate('employee-dashboard');
+        return;
       } else {
         final businessType = _businessType == 'company' ? 'COMPANY' : 'SOLE_TRADER';
         final displayName = companyName.isNotEmpty ? companyName : fullName.split(' ').first;
