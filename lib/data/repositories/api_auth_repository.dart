@@ -352,7 +352,7 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> registerServiceProvider({
+  Future<Session> registerServiceProvider({
     required String email,
     required String password,
     required String confirmPassword,
@@ -455,6 +455,26 @@ class ApiAuthRepository implements AuthRepository {
           'Registration failed (HTTP ${res.statusCode}).';
       throw AuthException(msg);
     }
+
+    var session = _sessionFromAuthBody(
+      body,
+      fallbackEmail: email,
+      roleHint:
+          businessType == 'COMPANY' ? UserRole.company : UserRole.mechanic,
+    );
+    if (businessType == 'COMPANY') {
+      // Some register responses omit tokens. Sign in immediately so the
+      // company dashboard always receives an authenticated session.
+      if (session.accessToken?.trim().isEmpty ?? true) {
+        session = await login(
+          email: email,
+          password: password,
+          roleHint: UserRole.company,
+        );
+      }
+      await saveSession(session);
+    }
+    return session;
   }
 
   @override
