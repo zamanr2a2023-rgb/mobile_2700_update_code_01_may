@@ -48,8 +48,9 @@ abstract class AuthRepository {
     required String confirmPassword,
   });
 
-  /// Service Provider (mechanic) registration.
-  Future<void> registerServiceProvider({
+  /// Service Provider registration. Companies use the returned session to
+  /// enter the company dashboard immediately after successful registration.
+  Future<Session> registerServiceProvider({
     required String email,
     required String password,
     required String confirmPassword,
@@ -171,7 +172,7 @@ class MemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> registerServiceProvider({
+  Future<Session> registerServiceProvider({
     required String email,
     required String password,
     required String confirmPassword,
@@ -193,7 +194,14 @@ class MemoryAuthRepository implements AuthRepository {
     String? profilePhotoPath,
     List<String>? skills,
   }) async {
-    // No-op for prototype mode.
+    final isCompany = businessType.trim().toUpperCase() == 'COMPANY';
+    final session = Session(
+      email: email,
+      role: isCompany ? UserRole.company : UserRole.mechanic,
+      displayName: (displayName ?? fullName).trim(),
+    );
+    if (isCompany) await saveSession(session);
+    return session;
   }
 
   @override

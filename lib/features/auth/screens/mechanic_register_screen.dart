@@ -68,14 +68,13 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
   final _password = TextEditingController();
   final _confirm = TextEditingController();
   String _businessType = 'sole_trader'; // sole_trader | company
-  /// When [_businessType] is `company`: workshop owner vs invited employee.
-  String _companyRelation = 'owner'; // owner | employee
+  // Employee registration is handled only by the validated invitation flow.
   final _inviteToken = TextEditingController();
   final _employeeDisplayName = TextEditingController();
   final Set<String> _employeeSkills = {};
   String? _profilePhotoPath;
 
-  bool get _isEmployeePath => _businessType == 'company' && _companyRelation == 'employee';
+  bool get _isEmployeePath => false;
 
   @override
   void dispose() {
@@ -182,7 +181,7 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
         final businessType = _businessType == 'company' ? 'COMPANY' : 'SOLE_TRADER';
         final displayName = companyName.isNotEmpty ? companyName : fullName.split(' ').first;
 
-        await auth.registerServiceProvider(
+        final session = await auth.registerServiceProvider(
           email: email,
           password: password,
           confirmPassword: confirmPassword,
@@ -203,6 +202,13 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
           profilePhotoPath: _profilePhotoPath,
           skills: const [],
         );
+        if (_businessType == 'company') {
+          if (!mounted) return;
+          await context.read<AuthViewModel>().adoptSession(session);
+          if (!mounted) return;
+          widget.onNavigate('company-dashboard');
+          return;
+        }
       }
       if (!mounted) return;
       widget.onNavigate('mechanic-terms');
@@ -219,9 +225,6 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
   String _infoBannerText() {
     if (_businessType == 'sole_trader') {
       return "You work alone and manage all jobs yourself. You'll see all financial information and job details.";
-    }
-    if (_isEmployeePath) {
-      return 'Enter your invite token and profile details. Your account is created as a mechanic employee — jobs assigned by your company only.';
     }
     return 'You can add multiple mechanics to your team. You\'ll manage finances while mechanics only see their assigned jobs.';
   }
@@ -344,9 +347,8 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
                           icon: Icons.person_outline,
                           title: 'Sole Trader',
                           subtitle: 'Working alone',
-                            onTap: () => setState(() {
+                          onTap: () => setState(() {
                             _businessType = 'sole_trader';
-                            _companyRelation = 'owner';
                           }),
                         ),
                       ),
@@ -359,53 +361,11 @@ class _MechanicRegisterBodyState extends State<_MechanicRegisterBody> {
                           subtitle: 'Multiple mechanics',
                           onTap: () => setState(() {
                             _businessType = 'company';
-                            _companyRelation = 'owner';
                           }),
                         ),
                       ),
                     ],
                   ),
-                  if (_businessType == 'company') ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'ARE YOU A MECHANIC EMPLOYEE OR YOUR COMPANY?',
-                      style: TextStyle(
-                        color: AppColors.primary,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _businessTypeCard(
-                            selected: _companyRelation == 'employee',
-                            icon: Icons.badge_outlined,
-                            title: 'Mechanic Employee',
-                            subtitle: 'Invite code',
-                            compact: true,
-                            onTap: () => setState(() {
-                              _companyRelation = 'employee';
-                              _profilePhotoPath = null;
-                            }),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _businessTypeCard(
-                            selected: _companyRelation == 'owner',
-                            icon: Icons.storefront_outlined,
-                            title: 'Your company',
-                            subtitle: 'Register workshop',
-                            compact: true,
-                            onTap: () => setState(() => _companyRelation = 'owner'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
