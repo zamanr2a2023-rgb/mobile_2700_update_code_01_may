@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/constants/api_constants.dart';
+import 'api_client.dart';
 
 class FleetApiService {
   FleetApiService({http.Client? client, String? baseUrl})
@@ -508,21 +509,11 @@ class FleetApiService {
   }
 
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
-    Map<String, dynamic> body;
-    try {
-      final decoded = jsonDecode(res.body);
-      body = (decoded is Map<String, dynamic>) ? decoded : <String, dynamic>{};
-    } catch (_) {
-      body = <String, dynamic>{};
-    }
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      final msg = (body['message'] is String && (body['message'] as String).trim().isNotEmpty)
-          ? body['message'] as String
-          : '$defaultMessage (HTTP ${res.statusCode})';
-      throw FleetApiException(msg);
-    }
-    return body;
+    return ApiClient.decodeOrThrowSync(
+      res,
+      defaultMessage: defaultMessage,
+      onError: FleetApiException.new,
+    );
   }
 }
 

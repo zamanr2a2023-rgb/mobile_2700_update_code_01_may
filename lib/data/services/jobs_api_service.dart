@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
+import '../../core/auth/auth_session_coordinator.dart';
 import '../../core/constants/api_constants.dart';
+import 'api_client.dart';
 
 /// Single photo part for `POST /jobs` — servers often reject `application/octet-stream`.
 http.MultipartFile buildJobPhotoMultipartPart({
@@ -75,6 +77,13 @@ class JobsApiService {
     }
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
+      if (ApiClient.isAuthFailure(res.statusCode, body)) {
+        // ignore: unawaited_futures
+        AuthSessionCoordinator.instance.invalidateSession(reason: 'http_${res.statusCode}');
+        throw AuthSessionInvalidException(
+          ApiClient.pickMessage(body) ?? 'Session expired. Please sign in again.',
+        );
+      }
       final raw = body['message'] is String ? body['message'] as String : null;
       final data = body['data'];
       throw JobsApiException(

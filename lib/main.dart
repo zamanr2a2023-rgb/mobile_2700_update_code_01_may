@@ -31,11 +31,6 @@ Future<void> main() async {
   final jobRepository = MemoryJobRepository();
   final authViewModel = AuthViewModel(authRepository);
   await authViewModel.loadSession();
-  if (authViewModel.isAuthenticated && authViewModel.session != null) {
-    unawaited(
-      DeviceTokenSyncService.instance.syncWithSession(authViewModel.session!),
-    );
-  }
 
   final router = AppRouter.create(authViewModel);
   InviteDeepLinkService.instance.attachRouter(router);

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,8 +7,10 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/api_constants.dart';
+import '../../core/auth/session_validation.dart';
 import '../models/forgot_password_result.dart';
 import '../models/session.dart';
+import '../services/api_client.dart';
 import '../services/users_api_service.dart';
 import 'app_repository.dart';
 
@@ -22,7 +25,10 @@ class ApiAuthRepository implements AuthRepository {
   final String _baseUrl;
 
   Session? _session;
-  static const _kSessionKey = 'truckfix.session.v1';
+
+  /// SharedPreferences key for the signed-in session JSON (excluded from Android backup).
+  static const sessionPrefsKey = 'truckfix.session.v1';
+  static const _kSessionKey = sessionPrefsKey;
 
   @override
   Future<void> clearSession() async {
@@ -33,7 +39,13 @@ class ApiAuthRepository implements AuthRepository {
 
   @override
   Future<Session?> getSession() async {
-    if (_session != null) return _session;
+    if (_session != null) {
+      if ((_session!.accessToken?.trim().isEmpty ?? true)) {
+        await clearSession();
+        return null;
+      }
+      return _session;
+    }
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_kSessionKey);
     if (raw == null || raw.trim().isEmpty) return null;
@@ -43,16 +55,22 @@ class ApiAuthRepository implements AuthRepository {
       final role = _parseRole(decoded['role']) ?? UserRole.fleet;
       final email = (decoded['email'] as String?) ?? '';
       if (email.trim().isEmpty) return null;
+      final accessToken = decoded['accessToken'] as String?;
+      if (accessToken == null || accessToken.trim().isEmpty) {
+        await prefs.remove(_kSessionKey);
+        return null;
+      }
       final session = Session(
         email: email,
         role: role,
         displayName: decoded['displayName'] as String?,
-        accessToken: decoded['accessToken'] as String?,
+        accessToken: accessToken,
         refreshToken: decoded['refreshToken'] as String?,
       );
       _session = session;
       return session;
     } catch (_) {
+      await prefs.remove(_kSessionKey);
       return null;
     }
   }
@@ -71,6 +89,70 @@ class ApiAuthRepository implements AuthRepository {
         'refreshToken': session.refreshToken,
       }),
     );
+  }
+
+  @override
+  Future<SessionValidationResult> validateStoredSession() async {
+    final session = await getSession();
+    if (session == null) return const SessionValidationResult.none();
+
+    final token = session.accessToken!.trim();
+
+    // Local JWT expiry is informational only — still confirm with the server
+    // unless we later wire a refresh endpoint via [ApiClient.refreshAccessToken].
+    if (ApiClient.isJwtExpired(token) && ApiClient.refreshAccessToken != null) {
+      try {
+        final refreshed = await ApiClient.refreshAccessToken!.call();
+        if (refreshed == null || refreshed.trim().isEmpty) {
+          await clearSession();
+          return const SessionValidationResult.invalid();
+        }
+      } catch (_) {
+        await clearSession();
+        return const SessionValidationResult.invalid();
+      }
+    }
+
+    try {
+      final uri = Uri.parse('$_baseUrl${ApiConstants.usersMePath}');
+      final res = await _client.get(
+        uri,
+        headers: ApiClient.bearerHeaders(token),
+      );
+
+      final body = ApiClient.decodeJsonObject(res.body);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        return SessionValidationResult.valid(session);
+      }
+
+      if (ApiClient.isAuthFailure(res.statusCode, body)) {
+        await clearSession();
+        return const SessionValidationResult.invalid();
+      }
+
+      // Other 4xx (e.g. 404) or unexpected — do not wipe credentials on ambiguity
+      // if it looks like a temporary server issue.
+      if (res.statusCode >= 500) {
+        return const SessionValidationResult.unreachable();
+      }
+
+      // Non-auth client errors while probing /me → treat as invalid session.
+      if (res.statusCode >= 400 && res.statusCode < 500) {
+        await clearSession();
+        return const SessionValidationResult.invalid();
+      }
+
+      return const SessionValidationResult.unreachable();
+    } on TimeoutException {
+      return const SessionValidationResult.unreachable();
+    } on SocketException {
+      return const SessionValidationResult.unreachable();
+    } on http.ClientException {
+      return const SessionValidationResult.unreachable();
+    } catch (_) {
+      return const SessionValidationResult.unreachable();
+    }
   }
 
   static UserRole? _parseRole(dynamic value) {

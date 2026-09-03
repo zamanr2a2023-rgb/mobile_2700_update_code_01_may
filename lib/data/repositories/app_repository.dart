@@ -5,6 +5,7 @@ import '../models/forgot_password_result.dart';
 import '../models/session.dart';
 import '../models/team_member.dart';
 import '../models/vehicle.dart';
+import '../../core/auth/session_validation.dart';
 import '../../core/constants/app_assets.dart';
 import '../../features/categories/job_categories.dart';
 
@@ -12,6 +13,11 @@ abstract class AuthRepository {
   Future<Session?> getSession();
   Future<void> saveSession(Session session);
   Future<void> clearSession();
+
+  /// Validate a stored session against `GET /api/v1/users/me` (or equivalent).
+  ///
+  /// Does not treat network/5xx failures as invalid credentials.
+  Future<SessionValidationResult> validateStoredSession();
 
   /// Real backend login. Implementations may ignore [roleHint] if backend returns role.
   Future<Session> login({
@@ -102,6 +108,18 @@ class MemoryAuthRepository implements AuthRepository {
   @override
   Future<void> saveSession(Session session) async {
     _session = session;
+  }
+
+  @override
+  Future<SessionValidationResult> validateStoredSession() async {
+    final session = _session;
+    if (session == null) return const SessionValidationResult.none();
+    final token = session.accessToken?.trim() ?? '';
+    if (token.isEmpty) {
+      // Memory/dev sessions may omit tokens — treat as valid for local prototyping.
+      return SessionValidationResult.valid(session);
+    }
+    return SessionValidationResult.valid(session);
   }
 
   @override

@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../core/auth/auth_session_coordinator.dart';
 import '../../core/constants/api_constants.dart';
+import 'api_client.dart';
 
 /// Maps Help & Support UI category ids (`technical`, fleet `mechanic`, …) to API enums.
 String supportTicketCategoryEnum(String uiId) {
@@ -68,6 +70,13 @@ class SupportApiService {
     }
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
+      if (ApiClient.isAuthFailure(res.statusCode, body)) {
+        // ignore: unawaited_futures
+        AuthSessionCoordinator.instance.invalidateSession(reason: 'http_${res.statusCode}');
+        throw AuthSessionInvalidException(
+          ApiClient.pickMessage(body) ?? 'Session expired. Please sign in again.',
+        );
+      }
       final msg = (body['message'] is String && (body['message'] as String).trim().isNotEmpty)
           ? body['message'] as String
           : 'Failed to send message (HTTP ${res.statusCode})';

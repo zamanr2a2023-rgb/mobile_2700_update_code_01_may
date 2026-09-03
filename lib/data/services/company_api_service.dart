@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/constants/api_constants.dart';
+import 'api_client.dart';
 
 /// Company-role API calls (same host as mechanic; Bearer identifies company user).
 class CompanyApiService {
@@ -283,31 +284,18 @@ class CompanyApiService {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return;
     }
-    Map<String, dynamic> body = {};
-    try {
-      if (res.body.isNotEmpty) {
-        final decoded = jsonDecode(res.body);
-        body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
-      }
-    } catch (_) {}
-    final msg = (body['message'] as String?) ?? 'Request failed';
-    throw Exception(msg);
+    ApiClient.decodeOrThrowSync(
+      res,
+      defaultMessage: 'Request failed',
+      onError: (msg) => Exception(msg),
+    );
   }
 
   Map<String, dynamic> _decodeOrThrow(http.Response res, {required String defaultMessage}) {
-    Map<String, dynamic> body;
-    try {
-      final decoded = jsonDecode(res.body);
-      body = (decoded is Map<String, dynamic>) ? decoded : <String, dynamic>{};
-    } catch (_) {
-      body = <String, dynamic>{};
-    }
-
-    final ok = res.statusCode >= 200 && res.statusCode < 300;
-    if (!ok) {
-      final msg = (body['message'] as String?) ?? defaultMessage;
-      throw Exception(msg);
-    }
-    return body;
+    return ApiClient.decodeOrThrowSync(
+      res,
+      defaultMessage: defaultMessage,
+      onError: (msg) => Exception(msg),
+    );
   }
 }
